@@ -273,6 +273,27 @@ function restoreCronJobs(manifest: Manifest, stageDir: string): number {
   return manifest.cron_jobs?.length ?? cronFileCount;
 }
 
+// ── Step 3.5: Restore credentials (pairing, allowFrom) ────────────
+
+function restoreCredentials(stageDir: string): number {
+  console.log('🔐 Restoring credentials...');
+  const credSrc = path.join(stageDir, 'credentials');
+  if (!fs.existsSync(credSrc)) {
+    console.log('   (none)');
+    return 0;
+  }
+
+  const credDst = path.join(OPENCLAW_DIR, 'credentials');
+  fs.mkdirSync(credDst, { recursive: true });
+
+  const files = fs.readdirSync(credSrc).filter(f => f.endsWith('.json'));
+  for (const f of files) {
+    fs.copyFileSync(path.join(credSrc, f), path.join(credDst, f));
+  }
+  console.log(`   ✅ ${files.length} credential file(s) restored`);
+  return files.length;
+}
+
 // ── Step 4 & 5: GitHub auth + clone repos ──────────────────────────
 
 function cloneGitHubRepos(manifest: Manifest, targetWorkspace: string): { cloned: number; skipped: number; failed: number } {
@@ -478,6 +499,9 @@ export async function unpack(soulFile: string, workspacePath?: string): Promise<
 
   // ── Step 6: Restore cron jobs ───────────────────────────────────
   const cronCount = restoreCronJobs(manifest, stageDir);
+
+  // ── Step 6.5: Restore credentials ─────────────────────────────
+  const credCount = restoreCredentials(stageDir);
 
   // ── Step 7: Clone GitHub repos ──────────────────────────────────
   const repoResult = cloneGitHubRepos(manifest, targetWorkspace);

@@ -106,6 +106,23 @@ export async function pack(agentId?: string, outputPath?: string): Promise<void>
   }
   console.log(`   ✅ ${cronFiles.length} cron files`);
 
+  // 5.5. Collect credentials (pairing records, allowFrom lists)
+  console.log('🔐 Collecting credentials...');
+  const credDir = path.join(OPENCLAW_DIR, 'credentials');
+  let credCount = 0;
+  if (fs.existsSync(credDir)) {
+    const credFiles = fs.readdirSync(credDir).filter(f => f.endsWith('.json'));
+    for (const f of credFiles) {
+      const src = path.join(credDir, f);
+      const dst = path.join(stageDir, 'credentials', f);
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.copyFileSync(src, dst);
+      allFiles.push(`credentials/${f}`);
+      credCount++;
+    }
+  }
+  console.log(`   ✅ ${credCount} credential files`);
+
   // 6. Load full cron job content for this agent
   console.log('⏰ Extracting cron job definitions...');
   const cronJobs = loadCronJobs(agent.id);

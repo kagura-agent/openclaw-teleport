@@ -263,6 +263,21 @@ async function pack(agentId, outputPath) {
     allFiles.push(`cron/${f}`);
   }
   console.log(`   \u2705 ${cronFiles.length} cron files`);
+  console.log("\u{1F510} Collecting credentials...");
+  const credDir = path2.join(OPENCLAW_DIR2, "credentials");
+  let credCount = 0;
+  if (fs2.existsSync(credDir)) {
+    const credFiles = fs2.readdirSync(credDir).filter((f) => f.endsWith(".json"));
+    for (const f of credFiles) {
+      const src = path2.join(credDir, f);
+      const dst = path2.join(stageDir, "credentials", f);
+      fs2.mkdirSync(path2.dirname(dst), { recursive: true });
+      fs2.copyFileSync(src, dst);
+      allFiles.push(`credentials/${f}`);
+      credCount++;
+    }
+  }
+  console.log(`   \u2705 ${credCount} credential files`);
   console.log("\u23F0 Extracting cron job definitions...");
   const cronJobs = loadCronJobs(agent.id);
   console.log(`   \u2705 ${cronJobs.length} cron jobs for ${agent.id}`);
@@ -529,6 +544,22 @@ function restoreCronJobs(manifest, stageDir) {
   }
   return manifest.cron_jobs?.length ?? cronFileCount;
 }
+function restoreCredentials(stageDir) {
+  console.log("\u{1F510} Restoring credentials...");
+  const credSrc = path3.join(stageDir, "credentials");
+  if (!fs3.existsSync(credSrc)) {
+    console.log("   (none)");
+    return 0;
+  }
+  const credDst = path3.join(OPENCLAW_DIR3, "credentials");
+  fs3.mkdirSync(credDst, { recursive: true });
+  const files = fs3.readdirSync(credSrc).filter((f) => f.endsWith(".json"));
+  for (const f of files) {
+    fs3.copyFileSync(path3.join(credSrc, f), path3.join(credDst, f));
+  }
+  console.log(`   \u2705 ${files.length} credential file(s) restored`);
+  return files.length;
+}
 function cloneGitHubRepos(manifest, targetWorkspace) {
   const result = { cloned: 0, skipped: 0, failed: 0 };
   if (!manifest.github_repos || manifest.github_repos.length === 0) {
@@ -689,6 +720,7 @@ async function unpack(soulFile, workspacePath) {
   }
   writeAgentConfig(manifest, stageDir, targetWorkspace);
   const cronCount = restoreCronJobs(manifest, stageDir);
+  const credCount = restoreCredentials(stageDir);
   const repoResult = cloneGitHubRepos(manifest, targetWorkspace);
   fs3.rmSync(tmpDir, { recursive: true });
   let gatewayStarted = false;
