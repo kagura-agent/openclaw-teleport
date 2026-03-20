@@ -169,6 +169,12 @@ function writeAgentConfig(
       }
     }
 
+    // Merge gateway config
+    if (manifest.gateway && Object.keys(manifest.gateway).length > 0) {
+      existingConfig.gateway = { ...(existingConfig.gateway ?? {}), ...manifest.gateway };
+      console.log('   ✅ Gateway config restored');
+    }
+
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(existingConfig, null, 2));
   } else {
     // Create new config from scratch
@@ -198,6 +204,12 @@ function writeAgentConfig(
     if (manifest.bindings && manifest.bindings.length > 0) {
       newConfig.bindings = manifest.bindings;
       console.log('   ✅ Bindings restored');
+    }
+
+    // Add gateway config
+    if (manifest.gateway && Object.keys(manifest.gateway).length > 0) {
+      newConfig.gateway = manifest.gateway;
+      console.log('   ✅ Gateway config restored');
     }
 
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(newConfig, null, 2));

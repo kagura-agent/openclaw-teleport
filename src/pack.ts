@@ -126,10 +126,11 @@ export async function pack(agentId?: string, outputPath?: string): Promise<void>
   const channelCount = Object.keys(channelsConfig).length;
   console.log(`   ✅ ${channelCount} channel(s) saved`);
 
-  // 10. Extract agent defaults and models config
+  // 10. Extract agent defaults, models config, and gateway config
   const agentDefaults = sanitizeAgentDefaults(config.agents?.defaults ?? {});
   const modelsConfig = config.models ?? {};
   const bindingsConfig = config.bindings ?? [];
+  const gatewayConfig = config.gateway ?? {};
 
   // 11. Generate manifest
   const manifest: Manifest = {
@@ -144,6 +145,7 @@ export async function pack(agentId?: string, outputPath?: string): Promise<void>
     agent_defaults: agentDefaults,
     models_config: modelsConfig,
     bindings: bindingsConfig as Array<Record<string, unknown>>,
+    gateway: gatewayConfig as Record<string, unknown>,
   };
 
   const manifestPath = path.join(stageDir, 'manifest.json');

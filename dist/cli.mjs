@@ -278,6 +278,7 @@ async function pack(agentId, outputPath) {
   const agentDefaults = sanitizeAgentDefaults(config.agents?.defaults ?? {});
   const modelsConfig = config.models ?? {};
   const bindingsConfig = config.bindings ?? [];
+  const gatewayConfig = config.gateway ?? {};
   const manifest = {
     agent_id: agent.id,
     agent_name: agent.name,
@@ -289,7 +290,8 @@ async function pack(agentId, outputPath) {
     cron_jobs: cronJobs,
     agent_defaults: agentDefaults,
     models_config: modelsConfig,
-    bindings: bindingsConfig
+    bindings: bindingsConfig,
+    gateway: gatewayConfig
   };
   const manifestPath = path2.join(stageDir, "manifest.json");
   fs2.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
@@ -450,6 +452,10 @@ function writeAgentConfig(manifest, stageDir, targetWorkspace) {
         console.log("   \u23ED\uFE0F  Bindings already exist, skipping");
       }
     }
+    if (manifest.gateway && Object.keys(manifest.gateway).length > 0) {
+      existingConfig.gateway = { ...existingConfig.gateway ?? {}, ...manifest.gateway };
+      console.log("   \u2705 Gateway config restored");
+    }
     fs3.writeFileSync(CONFIG_PATH2, JSON.stringify(existingConfig, null, 2));
   } else {
     const newConfig = {
@@ -472,6 +478,10 @@ function writeAgentConfig(manifest, stageDir, targetWorkspace) {
     if (manifest.bindings && manifest.bindings.length > 0) {
       newConfig.bindings = manifest.bindings;
       console.log("   \u2705 Bindings restored");
+    }
+    if (manifest.gateway && Object.keys(manifest.gateway).length > 0) {
+      newConfig.gateway = manifest.gateway;
+      console.log("   \u2705 Gateway config restored");
     }
     fs3.writeFileSync(CONFIG_PATH2, JSON.stringify(newConfig, null, 2));
     console.log("   \u2705 New openclaw.json created");

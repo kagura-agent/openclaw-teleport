@@ -35,6 +35,8 @@ export interface Manifest {
   models_config?: Record<string, unknown>;
   /** Bindings configuration (added in v0.2) */
   bindings?: Array<Record<string, unknown>>;
+  /** Gateway configuration (added in v0.2.1) */
+  gateway?: Record<string, unknown>;
 }
 
 export interface CronJob {
