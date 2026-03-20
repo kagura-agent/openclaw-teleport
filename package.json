@@ -1,0 +1,31 @@
+{
+  "name": "soul-pack",
+  "version": "0.1.0",
+  "description": "Agent soul migration — pack your identity, memory, and tools into one file, unpack on a new machine",
+  "type": "module",
+  "bin": {
+    "soul-pack": "./dist/cli.mjs"
+  },
+  "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.mjs --banner:js=\"#!/usr/bin/env node\" --external:commander",
+    "dev": "tsx src/cli.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "kagura-project",
+    "ai-agent",
+    "migration",
+    "openclaw"
+  ],
+  "author": "kagura-agent",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  }
+}
