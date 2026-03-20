@@ -124,24 +124,29 @@ export function collectMemoryDir(workspace: string): string[] {
 
 export function collectDbFiles(workspace: string): string[] {
   const files: string[] = [];
-  const walk = (dir: string, prefix: string) => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
+  // Only collect .db files from known tool data directories, not recursively
+  // This prevents grabbing test DBs or unrelated data from project subdirs
+  const knownPaths = [
+    'gogetajob/data/gogetajob.db',
+    'flowforge/flowforge.db',
+    'data/gogetajob.db',
+    'data/flowforge.db',
+  ];
+  for (const rel of knownPaths) {
+    const full = path.join(workspace, rel);
+    if (fs.existsSync(full)) {
+      files.push(rel);
     }
-    for (const entry of entries) {
-      if (entry.name === 'node_modules' || entry.name === '.git') continue;
-      const rel = path.join(prefix, entry.name);
-      if (entry.isDirectory()) {
-        walk(path.join(dir, entry.name), rel);
-      } else if (entry.name.endsWith('.db')) {
-        files.push(rel);
+  }
+  // Also check workspace root for any .db files
+  try {
+    const rootEntries = fs.readdirSync(workspace, { withFileTypes: true });
+    for (const entry of rootEntries) {
+      if (entry.isFile() && entry.name.endsWith('.db')) {
+        files.push(entry.name);
       }
     }
-  };
-  walk(workspace, '');
+  } catch {}
   return files;
 }
 
