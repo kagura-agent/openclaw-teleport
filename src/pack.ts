@@ -21,7 +21,7 @@ import {
 const OPENCLAW_DIR = path.join(os.homedir(), '.openclaw');
 const CRON_DIR = path.join(OPENCLAW_DIR, 'cron');
 
-export async function pack(agentId?: string): Promise<void> {
+export async function pack(agentId?: string, outputPath?: string): Promise<void> {
   console.log('\n🌸 openclaw-teleport — packing agent soul...\n');
 
   // Load config and find agent
@@ -150,7 +150,7 @@ export async function pack(agentId?: string): Promise<void> {
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
   // 12. Create tarball
-  const outputFile = path.resolve(`${soulName}.soul`);
+  const outputFile = outputPath ? path.resolve(outputPath) : path.resolve(`${soulName}.soul`);
   console.log('\n📦 Packing soul archive...');
 
   execSync(`tar -czf "${outputFile}" -C "${tmpDir}" soul`, {

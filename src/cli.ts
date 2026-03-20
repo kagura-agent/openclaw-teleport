@@ -13,9 +13,10 @@ program
   .command('pack')
   .description('Pack an agent into a .soul archive')
   .argument('[agent-id]', 'Agent ID to pack (defaults to first configured agent)')
-  .action(async (agentId?: string) => {
+  .option('-o, --output <path>', 'Output file path (default: ./{agent}_{date}.soul)')
+  .action(async (agentId: string | undefined, opts: { output?: string }) => {
     try {
-      await pack(agentId);
+      await pack(agentId, opts.output);
     } catch (err) {
       console.error(`\n${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
