@@ -5,7 +5,7 @@ import { unpack, inspect } from './commands.js';
 const program = new Command();
 
 program
-  .name('soul-pack')
+  .name('openclaw-teleport')
   .description('🌸 Agent soul migration — pack your identity, memory, and tools into one file')
   .version('0.1.0');
 

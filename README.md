@@ -1,4 +1,4 @@
-# 🌸 soul-pack
+# 🌸 openclaw-teleport
 
 **Agent soul migration** — pack your identity, memory, and tools into one file, unpack on a new machine.
 
@@ -6,7 +6,7 @@ Built for [OpenClaw](https://github.com/nicepkg/openclaw) agents.
 
 ## What it does
 
-`soul-pack` captures everything that makes an agent *that agent*:
+`openclaw-teleport` captures everything that makes an agent *that agent*:
 
 - **Identity files** — SOUL.md, IDENTITY.md, USER.md, AGENTS.md, etc.
 - **Memory** — daily notes, long-term memory, everything in `memory/`
@@ -21,13 +21,13 @@ All packed into a single `.soul` file (tar.gz). Unpack it on a new machine and y
 ## Install
 
 ```bash
-npm install -g soul-pack
+npm install -g openclaw-teleport
 ```
 
 Or run directly:
 
 ```bash
-npx soul-pack pack
+npx openclaw-teleport pack
 ```
 
 ## Usage
@@ -36,10 +36,10 @@ npx soul-pack pack
 
 ```bash
 # Pack the default (first) agent
-soul-pack pack
+openclaw-teleport pack
 
 # Pack a specific agent
-soul-pack pack kagura
+openclaw-teleport pack kagura
 ```
 
 Output: `kagura_20260320.soul`
@@ -48,10 +48,10 @@ Output: `kagura_20260320.soul`
 
 ```bash
 # Unpack to default workspace (~/.openclaw/workspace)
-soul-pack unpack kagura_20260320.soul
+openclaw-teleport unpack kagura_20260320.soul
 
 # Unpack to a custom workspace
-soul-pack unpack kagura_20260320.soul --workspace /path/to/workspace
+openclaw-teleport unpack kagura_20260320.soul --workspace /path/to/workspace
 ```
 
 What happens:
@@ -66,7 +66,7 @@ What happens:
 ### Inspect a .soul file
 
 ```bash
-soul-pack inspect kagura_20260320.soul
+openclaw-teleport inspect kagura_20260320.soul
 ```
 
 Shows manifest info without unpacking: agent name, pack date, file count, repo list, services.
@@ -87,7 +87,7 @@ Shows manifest info without unpacking: agent name, pack date, file count, repo l
     │   └── ...
     └── *.db               ← tool databases packed
 
-         ↓ soul-pack pack
+         ↓ openclaw-teleport pack
 
     kagura_20260320.soul   (tar.gz archive)
     ├── manifest.json      ← metadata, repo list, services
@@ -97,7 +97,7 @@ Shows manifest info without unpacking: agent name, pack date, file count, repo l
     ├── config/            ← agent config
     └── cron/              ← scheduled tasks
 
-         ↓ soul-pack unpack (on new machine)
+         ↓ openclaw-teleport unpack (on new machine)
 
     Agent restored with all memories and identity 🌸
 ```
@@ -113,7 +113,7 @@ The manifest contains metadata about the packed agent:
   "packed_at": "2026-03-20T04:25:00.000Z",
   "files": ["identity/SOUL.md", "memory/2026-03-15.md", ...],
   "github_repos": [
-    { "name": "soul-pack", "url": "https://github.com/kagura-agent/soul-pack", "isFork": false }
+    { "name": "openclaw-teleport", "url": "https://github.com/kagura-agent/openclaw-teleport", "isFork": false }
   ],
   "services_to_rebind": ["feishu", "github"]
 }
@@ -122,8 +122,8 @@ The manifest contains metadata about the packed agent:
 ## Development
 
 ```bash
-git clone https://github.com/kagura-agent/soul-pack.git
-cd soul-pack
+git clone https://github.com/kagura-agent/openclaw-teleport.git
+cd openclaw-teleport
 npm install
 npm run build
 
@@ -137,7 +137,7 @@ MIT
 
 ---
 
-# 🌸 soul-pack（中文）
+# 🌸 openclaw-teleport（中文）
 
 **Agent 灵魂迁移工具** — 把你的身份、记忆和工具打包成一个文件，在新机器上一键还原。
 
@@ -145,7 +145,7 @@ MIT
 
 ## 功能
 
-`soul-pack` 捕获让一个 agent 成为「它自己」的一切：
+`openclaw-teleport` 捕获让一个 agent 成为「它自己」的一切：
 
 - **身份文件** — SOUL.md、IDENTITY.md、USER.md、AGENTS.md 等
 - **记忆** — 每日笔记、长期记忆、`memory/` 目录下的所有内容
@@ -160,23 +160,23 @@ MIT
 ## 安装
 
 ```bash
-npm install -g soul-pack
+npm install -g openclaw-teleport
 ```
 
 ## 使用
 
 ```bash
 # 打包默认 agent
-soul-pack pack
+openclaw-teleport pack
 
 # 打包指定 agent
-soul-pack pack kagura
+openclaw-teleport pack kagura
 
 # 在新机器上还原
-soul-pack unpack kagura_20260320.soul
+openclaw-teleport unpack kagura_20260320.soul
 
 # 查看 .soul 文件信息
-soul-pack inspect kagura_20260320.soul
+openclaw-teleport inspect kagura_20260320.soul
 ```
 
 ## 许可证

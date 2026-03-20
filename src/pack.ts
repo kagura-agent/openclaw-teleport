@@ -19,7 +19,7 @@ const OPENCLAW_DIR = path.join(os.homedir(), '.openclaw');
 const CRON_DIR = path.join(OPENCLAW_DIR, 'cron');
 
 export async function pack(agentId?: string): Promise<void> {
-  console.log('\n🌸 soul-pack — packing agent soul...\n');
+  console.log('\n🌸 openclaw-teleport — packing agent soul...\n');
 
   // Load config and find agent
   const config = loadConfig();
@@ -35,7 +35,7 @@ export async function pack(agentId?: string): Promise<void> {
   // Create temp directory for staging
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const soulName = `${agent.id}_${date}`;
-  const tmpDir = path.join(os.tmpdir(), `soul-pack-${soulName}`);
+  const tmpDir = path.join(os.tmpdir(), `openclaw-teleport-${soulName}`);
   const stageDir = path.join(tmpDir, 'soul');
 
   // Clean up any previous staging

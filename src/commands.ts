@@ -25,7 +25,7 @@ function extractManifest(soulFile: string): { tmpDir: string; manifest: Manifest
 }
 
 export async function unpack(soulFile: string, workspacePath?: string): Promise<void> {
-  console.log('\n🌸 soul-pack — unpacking agent soul...\n');
+  console.log('\n🌸 openclaw-teleport — unpacking agent soul...\n');
 
   if (!fs.existsSync(soulFile)) {
     throw new Error(`❌ File not found: ${soulFile}`);
