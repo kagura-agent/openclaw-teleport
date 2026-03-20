@@ -7,7 +7,7 @@ const program = new Command();
 program
   .name('openclaw-teleport')
   .description('🌸 Agent soul migration — pack your identity, memory, and tools into one file')
-  .version('0.1.0');
+  .version('0.2.0');
 
 program
   .command('pack')

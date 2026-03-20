@@ -12,6 +12,9 @@ import {
   getGitHubRepos,
   detectServices,
   extractAgentConfig,
+  extractChannelsConfig,
+  sanitizeAgentDefaults,
+  loadCronJobs,
   type Manifest,
 } from './utils.js';
 
@@ -91,7 +94,7 @@ export async function pack(agentId?: string): Promise<void> {
   allFiles.push('config/agent-config.json');
   console.log('   ✅ Agent config saved');
 
-  // 5. Collect cron jobs
+  // 5. Collect cron job files
   console.log('⏰ Collecting cron jobs...');
   const cronFiles = collectCronFiles(agent.id);
   for (const f of cronFiles) {
@@ -103,16 +106,32 @@ export async function pack(agentId?: string): Promise<void> {
   }
   console.log(`   ✅ ${cronFiles.length} cron files`);
 
-  // 6. Get GitHub repos
+  // 6. Load full cron job content for this agent
+  console.log('⏰ Extracting cron job definitions...');
+  const cronJobs = loadCronJobs(agent.id);
+  console.log(`   ✅ ${cronJobs.length} cron jobs for ${agent.id}`);
+
+  // 7. Get GitHub repos
   console.log('🐙 Fetching GitHub repos...');
   const repos = getGitHubRepos('kagura-agent');
   console.log(`   ✅ ${repos.length} repos found`);
 
-  // 7. Detect services
+  // 8. Detect services
   const services = detectServices(config);
   console.log(`🔗 Services to rebind: ${services.length > 0 ? services.join(', ') : 'none'}`);
 
-  // 8. Generate manifest
+  // 9. Extract channels config (with credentials)
+  console.log('🔑 Extracting channel credentials...');
+  const channelsConfig = extractChannelsConfig(config, agent.id);
+  const channelCount = Object.keys(channelsConfig).length;
+  console.log(`   ✅ ${channelCount} channel(s) saved`);
+
+  // 10. Extract agent defaults and models config
+  const agentDefaults = sanitizeAgentDefaults(config.agents?.defaults ?? {});
+  const modelsConfig = config.models ?? {};
+  const bindingsConfig = config.bindings ?? [];
+
+  // 11. Generate manifest
   const manifest: Manifest = {
     agent_id: agent.id,
     agent_name: agent.name,
@@ -120,12 +139,17 @@ export async function pack(agentId?: string): Promise<void> {
     files: allFiles,
     github_repos: repos,
     services_to_rebind: services,
+    channels: channelsConfig,
+    cron_jobs: cronJobs,
+    agent_defaults: agentDefaults,
+    models_config: modelsConfig,
+    bindings: bindingsConfig as Array<Record<string, unknown>>,
   };
 
   const manifestPath = path.join(stageDir, 'manifest.json');
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-  // 9. Create tarball
+  // 12. Create tarball
   const outputFile = path.resolve(`${soulName}.soul`);
   console.log('\n📦 Packing soul archive...');
 
@@ -143,12 +167,18 @@ export async function pack(agentId?: string): Promise<void> {
   console.log('\n' + '═'.repeat(50));
   console.log('🌸 Soul packed successfully!');
   console.log('═'.repeat(50));
-  console.log(`📦 File:    ${outputFile}`);
-  console.log(`📏 Size:    ${sizeMB} MB`);
-  console.log(`🆔 Agent:   ${agent.name} (${agent.id})`);
-  console.log(`📝 Files:   ${allFiles.length}`);
-  console.log(`🐙 Repos:   ${repos.length}`);
+  console.log(`📦 File:     ${outputFile}`);
+  console.log(`📏 Size:     ${sizeMB} MB`);
+  console.log(`🆔 Agent:    ${agent.name} (${agent.id})`);
+  console.log(`📝 Files:    ${allFiles.length}`);
+  console.log(`🐙 Repos:    ${repos.length}`);
   console.log(`🔗 Services: ${services.join(', ') || 'none'}`);
-  console.log(`⏰ Packed:  ${manifest.packed_at}`);
-  console.log('═'.repeat(50) + '\n');
+  console.log(`🔑 Channels: ${channelCount}`);
+  console.log(`⏰ Cron:     ${cronJobs.length} jobs`);
+  console.log(`📅 Packed:   ${manifest.packed_at}`);
+  console.log('═'.repeat(50));
+
+  console.log('\n⚠️  SECURITY WARNING: The .soul file contains credentials');
+  console.log('   (API tokens, app secrets). Treat it like a password file.');
+  console.log('   Do NOT commit it to git or share publicly.\n');
 }

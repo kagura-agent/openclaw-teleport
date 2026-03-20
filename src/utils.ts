@@ -25,6 +25,29 @@ export interface Manifest {
   files: string[];
   github_repos: Array<{ name: string; url: string; isFork: boolean }>;
   services_to_rebind: string[];
+  /** Channel configurations with credentials (added in v0.2) */
+  channels?: Record<string, unknown>;
+  /** Full cron jobs content (added in v0.2) */
+  cron_jobs?: CronJob[];
+  /** Agent defaults from openclaw.json (added in v0.2) */
+  agent_defaults?: Record<string, unknown>;
+  /** Models configuration (added in v0.2) */
+  models_config?: Record<string, unknown>;
+  /** Bindings configuration (added in v0.2) */
+  bindings?: Array<Record<string, unknown>>;
+}
+
+export interface CronJob {
+  id: string;
+  agentId: string;
+  name: string;
+  enabled: boolean;
+  schedule: Record<string, unknown>;
+  sessionTarget?: string;
+  wakeMode?: string;
+  payload: Record<string, unknown>;
+  delivery?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 export interface OpenClawConfig {
@@ -33,6 +56,8 @@ export interface OpenClawConfig {
     list?: AgentConfig[];
   };
   channels?: Record<string, unknown>;
+  models?: Record<string, unknown>;
+  bindings?: Array<Record<string, unknown>>;
   [key: string]: unknown;
 }
 
@@ -133,6 +158,26 @@ export function collectCronFiles(agentId: string): string[] {
   return files;
 }
 
+// ── Cron job content extraction ────────────────────────────────────
+
+/**
+ * Load full cron jobs for a specific agent from jobs.json.
+ * Returns the actual job objects (not just file names).
+ */
+export function loadCronJobs(agentId: string): CronJob[] {
+  const jobsPath = path.join(CRON_DIR, 'jobs.json');
+  if (!fs.existsSync(jobsPath)) return [];
+
+  try {
+    const data = JSON.parse(fs.readFileSync(jobsPath, 'utf-8'));
+    const jobs: CronJob[] = data.jobs ?? [];
+    // Filter to this agent's jobs
+    return jobs.filter((j) => j.agentId === agentId);
+  } catch {
+    return [];
+  }
+}
+
 // ── GitHub repos ───────────────────────────────────────────────────
 
 export function getGitHubRepos(owner: string): Array<{ name: string; url: string; isFork: boolean }> {
@@ -180,4 +225,82 @@ export function extractAgentConfig(config: OpenClawConfig, agentId: string): Rec
     agent,
     defaults,
   };
+}
+
+// ── Channel config extraction ──────────────────────────────────────
+
+/**
+ * Extract channel configurations (including credentials) relevant to an agent.
+ * Strips absolute paths but preserves tokens, appIds, appSecrets, etc.
+ */
+export function extractChannelsConfig(config: OpenClawConfig, agentId: string): Record<string, unknown> {
+  if (!config.channels) return {};
+
+  // Deep clone to avoid mutating original
+  const channels = JSON.parse(JSON.stringify(config.channels));
+
+  // Strip absolute paths from the cloned config
+  stripAbsolutePaths(channels);
+
+  return channels;
+}
+
+/**
+ * Recursively strip values that look like absolute paths.
+ * We preserve tokens, keys, IDs — only remove filesystem paths.
+ */
+function stripAbsolutePaths(obj: Record<string, unknown>): void {
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+    if (typeof val === 'string' && val.startsWith('/') && (val.includes('/home/') || val.includes('/Users/') || val.includes('/root/'))) {
+      // Mark as path-to-regenerate
+      obj[key] = `__PATH_PLACEHOLDER__`;
+    } else if (val && typeof val === 'object' && !Array.isArray(val)) {
+      stripAbsolutePaths(val as Record<string, unknown>);
+    } else if (Array.isArray(val)) {
+      for (let i = 0; i < val.length; i++) {
+        if (val[i] && typeof val[i] === 'object') {
+          stripAbsolutePaths(val[i] as Record<string, unknown>);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Strip absolute paths from agent defaults config.
+ * Replaces workspace, agentDir, and other path-like values with placeholders.
+ */
+export function sanitizeAgentDefaults(defaults: Record<string, unknown>): Record<string, unknown> {
+  const sanitized = JSON.parse(JSON.stringify(defaults));
+  // Remove workspace — it will be set dynamically on unpack
+  delete sanitized.workspace;
+  return sanitized;
+}
+
+// ── Command helpers ────────────────────────────────────────────────
+
+/**
+ * Check if a command exists on the system.
+ */
+export function commandExists(cmd: string): boolean {
+  try {
+    execSync(`which ${cmd}`, { encoding: 'utf-8', stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check GitHub CLI auth status.
+ * Returns true if authenticated.
+ */
+export function isGhAuthenticated(): boolean {
+  try {
+    execSync('gh auth status', { encoding: 'utf-8', stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
 }
