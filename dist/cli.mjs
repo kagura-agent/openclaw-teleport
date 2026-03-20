@@ -185,6 +185,24 @@ function commandExists(cmd) {
     return false;
   }
 }
+function installGh() {
+  try {
+    const platform2 = os.platform();
+    if (platform2 === "linux") {
+      execSync(
+        '(type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) && sudo mkdir -p -m 755 /etc/apt/keyrings && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && sudo apt update && sudo apt install gh -y',
+        { stdio: "pipe", timeout: 12e4 }
+      );
+    } else if (platform2 === "darwin") {
+      execSync("brew install gh", { stdio: "pipe", timeout: 12e4 });
+    } else {
+      return false;
+    }
+    return commandExists("gh");
+  } catch {
+    return false;
+  }
+}
 function isGhAuthenticated() {
   try {
     execSync("gh auth status", { encoding: "utf-8", stdio: "pipe" });
@@ -567,15 +585,19 @@ function cloneGitHubRepos(manifest, targetWorkspace) {
   }
   console.log("\n\u{1F419} Cloning GitHub repos...");
   if (!commandExists("gh")) {
-    console.log("   \u26A0\uFE0F  GitHub CLI (gh) not installed");
-    console.log("   Install it: https://cli.github.com/");
-    console.log("   Then run: gh auth login");
-    console.log(`   Repos to clone manually (${manifest.github_repos.length}):`);
-    for (const repo of manifest.github_repos) {
-      console.log(`     git clone ${repo.url}`);
+    console.log("   \u2B07\uFE0F  GitHub CLI (gh) not found, installing...");
+    const installed = installGh();
+    if (!installed) {
+      console.log("   \u26A0\uFE0F  Could not auto-install GitHub CLI");
+      console.log("   Install manually: https://cli.github.com/");
+      console.log(`   Repos to clone manually (${manifest.github_repos.length}):`);
+      for (const repo of manifest.github_repos) {
+        console.log(`     git clone ${repo.url}`);
+      }
+      result.failed = manifest.github_repos.length;
+      return result;
     }
-    result.failed = manifest.github_repos.length;
-    return result;
+    console.log("   \u2705 GitHub CLI installed");
   }
   if (!isGhAuthenticated()) {
     console.log("   \u26A0\uFE0F  GitHub CLI not authenticated");

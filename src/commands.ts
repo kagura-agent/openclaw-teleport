@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { execSync } from 'node:child_process';
-import { loadConfig, commandExists, isGhAuthenticated, type Manifest, type OpenClawConfig, type CronJob } from './utils.js';
+import { loadConfig, commandExists, installGh, isGhAuthenticated, type Manifest, type OpenClawConfig, type CronJob } from './utils.js';
 
 const OPENCLAW_DIR = path.join(os.homedir(), '.openclaw');
 const CONFIG_PATH = path.join(OPENCLAW_DIR, 'openclaw.json');
@@ -305,17 +305,21 @@ function cloneGitHubRepos(manifest: Manifest, targetWorkspace: string): { cloned
 
   console.log('\n🐙 Cloning GitHub repos...');
 
-  // Check if gh CLI is available
+  // Check if gh CLI is available, install if not
   if (!commandExists('gh')) {
-    console.log('   ⚠️  GitHub CLI (gh) not installed');
-    console.log('   Install it: https://cli.github.com/');
-    console.log('   Then run: gh auth login');
-    console.log(`   Repos to clone manually (${manifest.github_repos.length}):`);
-    for (const repo of manifest.github_repos) {
-      console.log(`     git clone ${repo.url}`);
+    console.log('   ⬇️  GitHub CLI (gh) not found, installing...');
+    const installed = installGh();
+    if (!installed) {
+      console.log('   ⚠️  Could not auto-install GitHub CLI');
+      console.log('   Install manually: https://cli.github.com/');
+      console.log(`   Repos to clone manually (${manifest.github_repos.length}):`);
+      for (const repo of manifest.github_repos) {
+        console.log(`     git clone ${repo.url}`);
+      }
+      result.failed = manifest.github_repos.length;
+      return result;
     }
-    result.failed = manifest.github_repos.length;
-    return result;
+    console.log('   ✅ GitHub CLI installed');
   }
 
   // Check GitHub auth
