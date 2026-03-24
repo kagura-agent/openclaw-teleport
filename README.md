@@ -10,9 +10,7 @@ Built for [OpenClaw](https://github.com/nicepkg/openclaw) agents.
 
 `openclaw-teleport` captures everything that makes an agent *that agent*:
 
-- **Identity files** — SOUL.md, IDENTITY.md, USER.md, AGENTS.md, etc.
-- **Memory** — daily notes, long-term memory, everything in `memory/`
-- **Tool data** — SQLite databases and other `.db` files
+- **Workspace** — entire workspace directory (identity files, memory, daily notes, workflows, skills, tool configs — everything except git repo subdirectories)
 - **Config** — agent configuration from `openclaw.json`
 - **Channel credentials** — Discord tokens, Feishu app secrets, all channel configs
 - **Cron jobs** — full scheduled task definitions (not just file names)
@@ -22,10 +20,10 @@ Built for [OpenClaw](https://github.com/nicepkg/openclaw) agents.
 All packed into a single `.soul` file (tar.gz). On a new machine, `unpack` does a **full one-command restoration**:
 
 1. ✅ Installs OpenClaw (if missing)
-2. ✅ Restores identity, memory, and data files
+2. ✅ Restores full workspace (files, memory, workflows, skills, databases)
 3. ✅ Writes agent config + channel credentials to `openclaw.json`
 4. ✅ Restores cron jobs
-5. ✅ Clones GitHub repos (forks go to `forks/` subdirectory)
+5. ✅ Clones GitHub repos (auto-detects forks)
 6. ✅ Guides through GitHub auth if needed
 7. ✅ Starts the OpenClaw gateway
 8. ✅ Prints a welcome summary
@@ -76,13 +74,12 @@ openclaw-teleport unpack kagura_20260320.soul --workspace /path/to/workspace
 
 What happens:
 1. **OpenClaw check** — installs via `npm install -g openclaw` if missing
-2. **Files restored** — identity, memory, tool databases
-3. **Config written** — agent config + channel credentials merged into `openclaw.json` (paths dynamically generated for the new machine)
+2. **Workspace restored** — full directory structure (identity, memory, workflows, skills, databases)
+3. **Config written** — agent config + channel credentials merged into `openclaw.json`
 4. **Cron jobs restored** — full job definitions written to `~/.openclaw/cron/jobs.json`
-5. **GitHub repos cloned** — using `gh repo clone` (forks → `workspace/forks/`, others → `workspace/`)
-6. **GitHub auth guided** — if `gh auth login` is needed, clear instructions printed
-7. **Gateway started** — `openclaw gateway start` (diagnostic info on failure)
-8. **Welcome summary** — file counts, repo status, configured services
+5. **GitHub repos cloned** — using `gh repo clone` (git repo subdirectories that were skipped during pack)
+6. **Gateway started** — `openclaw gateway start`
+7. **Welcome summary** — file counts, repo status, configured services
 
 ### Inspect a .soul file
 
@@ -99,29 +96,37 @@ Shows manifest info without unpacking: agent name, pack date, file count, repo l
 ├── openclaw.json          ← agent config + channels extracted
 ├── cron/jobs.json         ← full cron job definitions
 └── workspace/
-    ├── SOUL.md            ← identity files packed
+    ├── SOUL.md            ← identity files
     ├── IDENTITY.md
     ├── USER.md
     ├── TOOLS.md
-    ├── memory/            ← full memory directory packed
+    ├── HEARTBEAT.md
+    ├── NUDGE.md
+    ├── beliefs-candidates.md
+    ├── memory/            ← daily notes + long-term memory
     │   ├── 2026-03-15.md
     │   └── ...
-    └── *.db               ← tool databases packed
+    ├── skills/            ← custom skills
+    ├── flowforge/         ← git repo (skipped, cloned on unpack)
+    └── knowledge-base/    ← git repo (skipped, cloned on unpack)
 
          ↓ openclaw-teleport pack
 
-    kagura_20260320.soul   (tar.gz archive)
+    kagura_20260324.soul   (tar.gz archive)
     ├── manifest.json      ← metadata, repos, channels, cron jobs
-    ├── identity/          ← .md files
-    ├── memory/            ← memory directory
-    ├── data/              ← .db files
+    ├── workspace/         ← full workspace (minus git repos)
+    │   ├── SOUL.md
+    │   ├── memory/
+    │   ├── skills/
+    │   └── ...
     ├── config/            ← agent config
-    └── cron/              ← cron files
+    ├── cron/              ← cron files
+    └── credentials/       ← pairing records
 
          ↓ openclaw-teleport unpack (on new machine)
 
     1. Install OpenClaw (if needed)
-    2. Restore all files
+    2. Restore workspace files
     3. Write config + credentials to openclaw.json
     4. Restore cron jobs
     5. Clone GitHub repos (via gh)
@@ -138,7 +143,7 @@ The manifest contains metadata and embedded configurations:
   "agent_id": "kagura",
   "agent_name": "Kagura",
   "packed_at": "2026-03-20T04:25:00.000Z",
-  "files": ["identity/SOUL.md", "memory/2026-03-15.md", "..."],
+  "files": ["workspace/SOUL.md", "workspace/memory/2026-03-15.md", "..."],
   "github_repos": [
     { "name": "openclaw-teleport", "url": "https://github.com/kagura-agent/openclaw-teleport", "isFork": false }
   ],
