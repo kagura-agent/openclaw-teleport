@@ -1,6 +1,6 @@
 {
-  "name": "openclaw-teleport",
-  "version": "0.3.0",
+  "name": "@kagura-agent/openclaw-teleport",
+  "version": "0.3.1",
   "description": "Agent soul migration — pack your identity, memory, and tools into one file, unpack on a new machine",
   "type": "module",
   "bin": {
