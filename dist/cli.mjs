@@ -676,54 +676,7 @@ async function unpack(soulFile, workspacePath) {
     copyRecursive(workspaceDir, targetWorkspace);
     console.log(`   \u2705 ${workspaceCount} files restored`);
   } else {
-    console.log("   (legacy archive format detected)");
-    const identityDir = path3.join(stageDir, "identity");
-    if (fs3.existsSync(identityDir)) {
-      const files = fs3.readdirSync(identityDir);
-      for (const f of files) {
-        fs3.copyFileSync(path3.join(identityDir, f), path3.join(targetWorkspace, f));
-        workspaceCount++;
-        console.log(`   \u2705 ${f}`);
-      }
-    }
-    const memoryDir = path3.join(stageDir, "memory");
-    if (fs3.existsSync(memoryDir)) {
-      const copyRecursive = (src, dst) => {
-        fs3.mkdirSync(dst, { recursive: true });
-        const entries = fs3.readdirSync(src, { withFileTypes: true });
-        for (const entry of entries) {
-          const srcPath = path3.join(src, entry.name);
-          const dstPath = path3.join(dst, entry.name);
-          if (entry.isDirectory()) {
-            copyRecursive(srcPath, dstPath);
-          } else {
-            fs3.copyFileSync(srcPath, dstPath);
-            workspaceCount++;
-          }
-        }
-      };
-      copyRecursive(memoryDir, path3.join(targetWorkspace, "memory"));
-      console.log(`   \u2705 memory files restored`);
-    }
-    const dataDir = path3.join(stageDir, "data");
-    if (fs3.existsSync(dataDir)) {
-      const copyRecursive = (src, dst) => {
-        fs3.mkdirSync(dst, { recursive: true });
-        const entries = fs3.readdirSync(src, { withFileTypes: true });
-        for (const entry of entries) {
-          const srcPath = path3.join(src, entry.name);
-          const dstPath = path3.join(dst, entry.name);
-          if (entry.isDirectory()) {
-            copyRecursive(srcPath, dstPath);
-          } else {
-            fs3.copyFileSync(srcPath, dstPath);
-            workspaceCount++;
-          }
-        }
-      };
-      copyRecursive(dataDir, targetWorkspace);
-      console.log(`   \u2705 data files restored`);
-    }
+    console.log("   \u26A0\uFE0F  No workspace/ directory in archive");
   }
   writeAgentConfig(manifest, stageDir, targetWorkspace);
   const cronCount = restoreCronJobs(manifest, stageDir);
@@ -828,17 +781,11 @@ async function inspect(soulFile) {
       }
     }
     const workspaceFiles = manifest.files.filter((f) => f.startsWith("workspace/"));
-    const identityFiles = manifest.files.filter((f) => f.startsWith("identity/"));
-    const memoryFiles = manifest.files.filter((f) => f.startsWith("memory/"));
-    const dataFiles = manifest.files.filter((f) => f.startsWith("data/"));
     const cronFiles = manifest.files.filter((f) => f.startsWith("cron/"));
     const configFiles = manifest.files.filter((f) => f.startsWith("config/"));
     const credFiles = manifest.files.filter((f) => f.startsWith("credentials/"));
     console.log("\n\u{1F4CA} Contents breakdown:");
     if (workspaceFiles.length > 0) console.log(`   \u{1F4C2} Workspace: ${workspaceFiles.length} files`);
-    if (identityFiles.length > 0) console.log(`   \u{1F4DD} Identity: ${identityFiles.length} files (legacy)`);
-    if (memoryFiles.length > 0) console.log(`   \u{1F9E0} Memory:   ${memoryFiles.length} files (legacy)`);
-    if (dataFiles.length > 0) console.log(`   \u{1F5C4}\uFE0F  Data:     ${dataFiles.length} files (legacy)`);
     if (cronFiles.length > 0) console.log(`   \u23F0 Cron:     ${cronFiles.length} files`);
     if (configFiles.length > 0) console.log(`   \u2699\uFE0F  Config:   ${configFiles.length} files`);
     if (credFiles.length > 0) console.log(`   \u{1F510} Creds:    ${credFiles.length} files`);

@@ -141,64 +141,6 @@ export function collectWorkspaceFiles(workspace: string): string[] {
   return files;
 }
 
-// ── Legacy helpers (kept for backward compat but no longer used by pack) ──
-
-export function collectMarkdownFiles(workspace: string): string[] {
-  const files: string[] = [];
-  const entries = fs.readdirSync(workspace, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.name === 'node_modules' || entry.name === '.git') continue;
-    if (entry.isFile() && entry.name.endsWith('.md')) {
-      files.push(entry.name);
-    }
-  }
-  return files;
-}
-
-export function collectMemoryDir(workspace: string): string[] {
-  const memoryDir = path.join(workspace, 'memory');
-  if (!fs.existsSync(memoryDir)) return [];
-  const files: string[] = [];
-  const walk = (dir: string, prefix: string) => {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const rel = path.join(prefix, entry.name);
-      if (entry.isDirectory()) {
-        walk(path.join(dir, entry.name), rel);
-      } else {
-        files.push(rel);
-      }
-    }
-  };
-  walk(memoryDir, 'memory');
-  return files;
-}
-
-export function collectDbFiles(workspace: string): string[] {
-  const files: string[] = [];
-  const knownPaths = [
-    'gogetajob/data/gogetajob.db',
-    'flowforge/flowforge.db',
-    'data/gogetajob.db',
-    'data/flowforge.db',
-  ];
-  for (const rel of knownPaths) {
-    const full = path.join(workspace, rel);
-    if (fs.existsSync(full)) {
-      files.push(rel);
-    }
-  }
-  try {
-    const rootEntries = fs.readdirSync(workspace, { withFileTypes: true });
-    for (const entry of rootEntries) {
-      if (entry.isFile() && entry.name.endsWith('.db')) {
-        files.push(entry.name);
-      }
-    }
-  } catch {}
-  return files;
-}
-
 export function collectCronFiles(agentId: string): string[] {
   if (!fs.existsSync(CRON_DIR)) return [];
   const files: string[] = [];

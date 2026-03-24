@@ -441,7 +441,6 @@ export async function unpack(soulFile: string, workspacePath?: string): Promise<
   console.log('\n📂 Restoring workspace files...');
   let workspaceCount = 0;
 
-  // New format: workspace/ directory with full structure
   const workspaceDir = path.join(stageDir, 'workspace');
   if (fs.existsSync(workspaceDir)) {
     const copyRecursive = (src: string, dst: string) => {
@@ -461,61 +460,7 @@ export async function unpack(soulFile: string, workspacePath?: string): Promise<
     copyRecursive(workspaceDir, targetWorkspace);
     console.log(`   ✅ ${workspaceCount} files restored`);
   } else {
-    // Legacy format: identity/ + memory/ + data/ separate directories
-    console.log('   (legacy archive format detected)');
-
-    // Restore identity files
-    const identityDir = path.join(stageDir, 'identity');
-    if (fs.existsSync(identityDir)) {
-      const files = fs.readdirSync(identityDir);
-      for (const f of files) {
-        fs.copyFileSync(path.join(identityDir, f), path.join(targetWorkspace, f));
-        workspaceCount++;
-        console.log(`   ✅ ${f}`);
-      }
-    }
-
-    // Restore memory
-    const memoryDir = path.join(stageDir, 'memory');
-    if (fs.existsSync(memoryDir)) {
-      const copyRecursive = (src: string, dst: string) => {
-        fs.mkdirSync(dst, { recursive: true });
-        const entries = fs.readdirSync(src, { withFileTypes: true });
-        for (const entry of entries) {
-          const srcPath = path.join(src, entry.name);
-          const dstPath = path.join(dst, entry.name);
-          if (entry.isDirectory()) {
-            copyRecursive(srcPath, dstPath);
-          } else {
-            fs.copyFileSync(srcPath, dstPath);
-            workspaceCount++;
-          }
-        }
-      };
-      copyRecursive(memoryDir, path.join(targetWorkspace, 'memory'));
-      console.log(`   ✅ memory files restored`);
-    }
-
-    // Restore tool data
-    const dataDir = path.join(stageDir, 'data');
-    if (fs.existsSync(dataDir)) {
-      const copyRecursive = (src: string, dst: string) => {
-        fs.mkdirSync(dst, { recursive: true });
-        const entries = fs.readdirSync(src, { withFileTypes: true });
-        for (const entry of entries) {
-          const srcPath = path.join(src, entry.name);
-          const dstPath = path.join(dst, entry.name);
-          if (entry.isDirectory()) {
-            copyRecursive(srcPath, dstPath);
-          } else {
-            fs.copyFileSync(srcPath, dstPath);
-            workspaceCount++;
-          }
-        }
-      };
-      copyRecursive(dataDir, targetWorkspace);
-      console.log(`   ✅ data files restored`);
-    }
+    console.log('   ⚠️  No workspace/ directory in archive');
   }
 
   // ── Step 5: Write full agent config (with channels, credentials) ─
@@ -654,19 +599,12 @@ export async function inspect(soulFile: string): Promise<void> {
 
     // Show file breakdown
     const workspaceFiles = manifest.files.filter((f) => f.startsWith('workspace/'));
-    // Legacy format support
-    const identityFiles = manifest.files.filter((f) => f.startsWith('identity/'));
-    const memoryFiles = manifest.files.filter((f) => f.startsWith('memory/'));
-    const dataFiles = manifest.files.filter((f) => f.startsWith('data/'));
     const cronFiles = manifest.files.filter((f) => f.startsWith('cron/'));
     const configFiles = manifest.files.filter((f) => f.startsWith('config/'));
     const credFiles = manifest.files.filter((f) => f.startsWith('credentials/'));
 
     console.log('\n📊 Contents breakdown:');
     if (workspaceFiles.length > 0) console.log(`   📂 Workspace: ${workspaceFiles.length} files`);
-    if (identityFiles.length > 0) console.log(`   📝 Identity: ${identityFiles.length} files (legacy)`);
-    if (memoryFiles.length > 0) console.log(`   🧠 Memory:   ${memoryFiles.length} files (legacy)`);
-    if (dataFiles.length > 0) console.log(`   🗄️  Data:     ${dataFiles.length} files (legacy)`);
     if (cronFiles.length > 0) console.log(`   ⏰ Cron:     ${cronFiles.length} files`);
     if (configFiles.length > 0) console.log(`   ⚙️  Config:   ${configFiles.length} files`);
     if (credFiles.length > 0) console.log(`   🔐 Creds:    ${credFiles.length} files`);
