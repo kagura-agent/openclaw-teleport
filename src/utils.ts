@@ -93,6 +93,56 @@ export function findAgent(config: OpenClawConfig, agentId?: string): AgentConfig
 
 // ── File collection ────────────────────────────────────────────────
 
+/** Directories to always skip when recursively walking the workspace. */
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.venv', 'venv']);
+
+/**
+ * Check whether a directory is the root of its own git repository.
+ * Used to skip cloneable sub-repos (knowledge-base, gogetajob, etc.)
+ * so they are restored via `gh repo clone` instead of being packed.
+ */
+function isGitRepo(dirPath: string): boolean {
+  return fs.existsSync(path.join(dirPath, '.git'));
+}
+
+/**
+ * Recursively collect all files in the workspace, preserving the
+ * directory structure.  Skips:
+ *  - `node_modules`, `.git`, `dist`, build/cache dirs
+ *  - Sub-directories that are their own git repos (restored via clone)
+ *
+ * Returns paths relative to `workspace`.
+ */
+export function collectWorkspaceFiles(workspace: string): string[] {
+  const files: string[] = [];
+  const walk = (dir: string, prefix: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // permission errors, broken symlinks, etc.
+    }
+    for (const entry of entries) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+
+      const fullPath = path.join(dir, entry.name);
+      const rel = prefix ? path.join(prefix, entry.name) : entry.name;
+
+      if (entry.isDirectory()) {
+        // Skip sub-directories that are standalone git repos
+        if (isGitRepo(fullPath)) continue;
+        walk(fullPath, rel);
+      } else if (entry.isFile()) {
+        files.push(rel);
+      }
+    }
+  };
+  walk(workspace, '');
+  return files;
+}
+
+// ── Legacy helpers (kept for backward compat but no longer used by pack) ──
+
 export function collectMarkdownFiles(workspace: string): string[] {
   const files: string[] = [];
   const entries = fs.readdirSync(workspace, { withFileTypes: true });
@@ -126,8 +176,6 @@ export function collectMemoryDir(workspace: string): string[] {
 
 export function collectDbFiles(workspace: string): string[] {
   const files: string[] = [];
-  // Only collect .db files from known tool data directories, not recursively
-  // This prevents grabbing test DBs or unrelated data from project subdirs
   const knownPaths = [
     'gogetajob/data/gogetajob.db',
     'flowforge/flowforge.db',
@@ -140,7 +188,6 @@ export function collectDbFiles(workspace: string): string[] {
       files.push(rel);
     }
   }
-  // Also check workspace root for any .db files
   try {
     const rootEntries = fs.readdirSync(workspace, { withFileTypes: true });
     for (const entry of rootEntries) {

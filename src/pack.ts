@@ -5,9 +5,7 @@ import { execSync } from 'node:child_process';
 import {
   loadConfig,
   findAgent,
-  collectMarkdownFiles,
-  collectMemoryDir,
-  collectDbFiles,
+  collectWorkspaceFiles,
   collectCronFiles,
   getGitHubRepos,
   detectServices,
@@ -49,41 +47,34 @@ export async function pack(agentId?: string, outputPath?: string): Promise<void>
 
   const allFiles: string[] = [];
 
-  // 1. Collect identity files (.md in workspace root)
-  console.log('📝 Collecting identity files...');
-  const mdFiles = collectMarkdownFiles(agent.workspace);
-  for (const f of mdFiles) {
+  // 1. Collect entire workspace recursively (skips git repos, node_modules, etc.)
+  console.log('📂 Collecting workspace files...');
+  const wsFiles = collectWorkspaceFiles(agent.workspace);
+  for (const f of wsFiles) {
     const src = path.join(agent.workspace, f);
-    const dst = path.join(stageDir, 'identity', f);
+    const dst = path.join(stageDir, 'workspace', f);
     fs.mkdirSync(path.dirname(dst), { recursive: true });
     fs.copyFileSync(src, dst);
-    allFiles.push(`identity/${f}`);
+    allFiles.push(`workspace/${f}`);
   }
-  console.log(`   ✅ ${mdFiles.length} markdown files`);
+  console.log(`   ✅ ${wsFiles.length} files (skipped git repo subdirs)`);
 
-  // 2. Collect memory directory
-  console.log('🧠 Collecting memory...');
-  const memFiles = collectMemoryDir(agent.workspace);
-  for (const f of memFiles) {
-    const src = path.join(agent.workspace, f);
-    const dst = path.join(stageDir, f);
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    fs.copyFileSync(src, dst);
-    allFiles.push(f);
-  }
-  console.log(`   ✅ ${memFiles.length} memory files`);
-
-  // 3. Collect .db files
-  console.log('🗄️  Collecting tool data...');
-  const dbFiles = collectDbFiles(agent.workspace);
-  for (const f of dbFiles) {
-    const src = path.join(agent.workspace, f);
-    const dst = path.join(stageDir, 'data', f);
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    fs.copyFileSync(src, dst);
-    allFiles.push(`data/${f}`);
-  }
-  console.log(`   ✅ ${dbFiles.length} database files`);
+  // List skipped git repos for transparency
+  try {
+    const topEntries = fs.readdirSync(agent.workspace, { withFileTypes: true });
+    const skippedRepos: string[] = [];
+    for (const entry of topEntries) {
+      if (entry.isDirectory()) {
+        const gitDir = path.join(agent.workspace, entry.name, '.git');
+        if (fs.existsSync(gitDir)) {
+          skippedRepos.push(entry.name);
+        }
+      }
+    }
+    if (skippedRepos.length > 0) {
+      console.log(`   ⏭️  Skipped git repos (will clone on unpack): ${skippedRepos.join(', ')}`);
+    }
+  } catch {}
 
   // 4. Extract agent config
   console.log('⚙️  Extracting agent config...');

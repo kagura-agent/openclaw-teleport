@@ -39,58 +39,32 @@ function findAgent(config, agentId) {
   }
   return agents[0];
 }
-function collectMarkdownFiles(workspace) {
-  const files = [];
-  const entries = fs.readdirSync(workspace, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.name === "node_modules" || entry.name === ".git") continue;
-    if (entry.isFile() && entry.name.endsWith(".md")) {
-      files.push(entry.name);
-    }
-  }
-  return files;
+var SKIP_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", ".next", "__pycache__", ".venv", "venv"]);
+function isGitRepo(dirPath) {
+  return fs.existsSync(path.join(dirPath, ".git"));
 }
-function collectMemoryDir(workspace) {
-  const memoryDir = path.join(workspace, "memory");
-  if (!fs.existsSync(memoryDir)) return [];
+function collectWorkspaceFiles(workspace) {
   const files = [];
   const walk = (dir, prefix) => {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
     for (const entry of entries) {
-      const rel = path.join(prefix, entry.name);
+      if (SKIP_DIRS.has(entry.name)) continue;
+      const fullPath = path.join(dir, entry.name);
+      const rel = prefix ? path.join(prefix, entry.name) : entry.name;
       if (entry.isDirectory()) {
-        walk(path.join(dir, entry.name), rel);
-      } else {
+        if (isGitRepo(fullPath)) continue;
+        walk(fullPath, rel);
+      } else if (entry.isFile()) {
         files.push(rel);
       }
     }
   };
-  walk(memoryDir, "memory");
-  return files;
-}
-function collectDbFiles(workspace) {
-  const files = [];
-  const knownPaths = [
-    "gogetajob/data/gogetajob.db",
-    "flowforge/flowforge.db",
-    "data/gogetajob.db",
-    "data/flowforge.db"
-  ];
-  for (const rel of knownPaths) {
-    const full = path.join(workspace, rel);
-    if (fs.existsSync(full)) {
-      files.push(rel);
-    }
-  }
-  try {
-    const rootEntries = fs.readdirSync(workspace, { withFileTypes: true });
-    for (const entry of rootEntries) {
-      if (entry.isFile() && entry.name.endsWith(".db")) {
-        files.push(entry.name);
-      }
-    }
-  } catch {
-  }
+  walk(workspace, "");
   return files;
 }
 function collectCronFiles(agentId) {
@@ -234,36 +208,32 @@ async function pack(agentId, outputPath) {
   }
   fs2.mkdirSync(stageDir, { recursive: true });
   const allFiles = [];
-  console.log("\u{1F4DD} Collecting identity files...");
-  const mdFiles = collectMarkdownFiles(agent.workspace);
-  for (const f of mdFiles) {
+  console.log("\u{1F4C2} Collecting workspace files...");
+  const wsFiles = collectWorkspaceFiles(agent.workspace);
+  for (const f of wsFiles) {
     const src = path2.join(agent.workspace, f);
-    const dst = path2.join(stageDir, "identity", f);
+    const dst = path2.join(stageDir, "workspace", f);
     fs2.mkdirSync(path2.dirname(dst), { recursive: true });
     fs2.copyFileSync(src, dst);
-    allFiles.push(`identity/${f}`);
+    allFiles.push(`workspace/${f}`);
   }
-  console.log(`   \u2705 ${mdFiles.length} markdown files`);
-  console.log("\u{1F9E0} Collecting memory...");
-  const memFiles = collectMemoryDir(agent.workspace);
-  for (const f of memFiles) {
-    const src = path2.join(agent.workspace, f);
-    const dst = path2.join(stageDir, f);
-    fs2.mkdirSync(path2.dirname(dst), { recursive: true });
-    fs2.copyFileSync(src, dst);
-    allFiles.push(f);
+  console.log(`   \u2705 ${wsFiles.length} files (skipped git repo subdirs)`);
+  try {
+    const topEntries = fs2.readdirSync(agent.workspace, { withFileTypes: true });
+    const skippedRepos = [];
+    for (const entry of topEntries) {
+      if (entry.isDirectory()) {
+        const gitDir = path2.join(agent.workspace, entry.name, ".git");
+        if (fs2.existsSync(gitDir)) {
+          skippedRepos.push(entry.name);
+        }
+      }
+    }
+    if (skippedRepos.length > 0) {
+      console.log(`   \u23ED\uFE0F  Skipped git repos (will clone on unpack): ${skippedRepos.join(", ")}`);
+    }
+  } catch {
   }
-  console.log(`   \u2705 ${memFiles.length} memory files`);
-  console.log("\u{1F5C4}\uFE0F  Collecting tool data...");
-  const dbFiles = collectDbFiles(agent.workspace);
-  for (const f of dbFiles) {
-    const src = path2.join(agent.workspace, f);
-    const dst = path2.join(stageDir, "data", f);
-    fs2.mkdirSync(path2.dirname(dst), { recursive: true });
-    fs2.copyFileSync(src, dst);
-    allFiles.push(`data/${f}`);
-  }
-  console.log(`   \u2705 ${dbFiles.length} database files`);
   console.log("\u2699\uFE0F  Extracting agent config...");
   const agentConfig = extractAgentConfig(config, agent.id);
   const configPath = path2.join(stageDir, "config", "agent-config.json");
@@ -685,60 +655,75 @@ async function unpack(soulFile, workspacePath) {
   const openclawInstalled = ensureOpenClaw();
   const targetWorkspace = workspacePath ? path3.resolve(workspacePath) : path3.join(OPENCLAW_DIR3, "workspace");
   fs3.mkdirSync(targetWorkspace, { recursive: true });
-  console.log("\n\u{1F4DD} Restoring identity files...");
-  let identityCount = 0;
-  const identityDir = path3.join(stageDir, "identity");
-  if (fs3.existsSync(identityDir)) {
-    const files = fs3.readdirSync(identityDir);
-    for (const f of files) {
-      const src = path3.join(identityDir, f);
-      const dst = path3.join(targetWorkspace, f);
-      fs3.copyFileSync(src, dst);
-      console.log(`   \u2705 ${f}`);
-      identityCount++;
+  console.log("\n\u{1F4C2} Restoring workspace files...");
+  let workspaceCount = 0;
+  const workspaceDir = path3.join(stageDir, "workspace");
+  if (fs3.existsSync(workspaceDir)) {
+    const copyRecursive = (src, dst) => {
+      fs3.mkdirSync(dst, { recursive: true });
+      const entries = fs3.readdirSync(src, { withFileTypes: true });
+      for (const entry of entries) {
+        const srcPath = path3.join(src, entry.name);
+        const dstPath = path3.join(dst, entry.name);
+        if (entry.isDirectory()) {
+          copyRecursive(srcPath, dstPath);
+        } else {
+          fs3.copyFileSync(srcPath, dstPath);
+          workspaceCount++;
+        }
+      }
+    };
+    copyRecursive(workspaceDir, targetWorkspace);
+    console.log(`   \u2705 ${workspaceCount} files restored`);
+  } else {
+    console.log("   (legacy archive format detected)");
+    const identityDir = path3.join(stageDir, "identity");
+    if (fs3.existsSync(identityDir)) {
+      const files = fs3.readdirSync(identityDir);
+      for (const f of files) {
+        fs3.copyFileSync(path3.join(identityDir, f), path3.join(targetWorkspace, f));
+        workspaceCount++;
+        console.log(`   \u2705 ${f}`);
+      }
     }
-  }
-  console.log("\u{1F9E0} Restoring memory...");
-  let memoryCount = 0;
-  const memoryDir = path3.join(stageDir, "memory");
-  if (fs3.existsSync(memoryDir)) {
-    const copyRecursive = (src, dst) => {
-      fs3.mkdirSync(dst, { recursive: true });
-      const entries = fs3.readdirSync(src, { withFileTypes: true });
-      for (const entry of entries) {
-        const srcPath = path3.join(src, entry.name);
-        const dstPath = path3.join(dst, entry.name);
-        if (entry.isDirectory()) {
-          copyRecursive(srcPath, dstPath);
-        } else {
-          fs3.copyFileSync(srcPath, dstPath);
-          memoryCount++;
+    const memoryDir = path3.join(stageDir, "memory");
+    if (fs3.existsSync(memoryDir)) {
+      const copyRecursive = (src, dst) => {
+        fs3.mkdirSync(dst, { recursive: true });
+        const entries = fs3.readdirSync(src, { withFileTypes: true });
+        for (const entry of entries) {
+          const srcPath = path3.join(src, entry.name);
+          const dstPath = path3.join(dst, entry.name);
+          if (entry.isDirectory()) {
+            copyRecursive(srcPath, dstPath);
+          } else {
+            fs3.copyFileSync(srcPath, dstPath);
+            workspaceCount++;
+          }
         }
-      }
-    };
-    copyRecursive(memoryDir, path3.join(targetWorkspace, "memory"));
-    console.log(`   \u2705 ${memoryCount} memory files restored`);
-  }
-  console.log("\u{1F5C4}\uFE0F  Restoring tool data...");
-  let dataCount = 0;
-  const dataDir = path3.join(stageDir, "data");
-  if (fs3.existsSync(dataDir)) {
-    const copyRecursive = (src, dst) => {
-      fs3.mkdirSync(dst, { recursive: true });
-      const entries = fs3.readdirSync(src, { withFileTypes: true });
-      for (const entry of entries) {
-        const srcPath = path3.join(src, entry.name);
-        const dstPath = path3.join(dst, entry.name);
-        if (entry.isDirectory()) {
-          copyRecursive(srcPath, dstPath);
-        } else {
-          fs3.copyFileSync(srcPath, dstPath);
-          console.log(`   \u2705 ${entry.name}`);
-          dataCount++;
+      };
+      copyRecursive(memoryDir, path3.join(targetWorkspace, "memory"));
+      console.log(`   \u2705 memory files restored`);
+    }
+    const dataDir = path3.join(stageDir, "data");
+    if (fs3.existsSync(dataDir)) {
+      const copyRecursive = (src, dst) => {
+        fs3.mkdirSync(dst, { recursive: true });
+        const entries = fs3.readdirSync(src, { withFileTypes: true });
+        for (const entry of entries) {
+          const srcPath = path3.join(src, entry.name);
+          const dstPath = path3.join(dst, entry.name);
+          if (entry.isDirectory()) {
+            copyRecursive(srcPath, dstPath);
+          } else {
+            fs3.copyFileSync(srcPath, dstPath);
+            workspaceCount++;
+          }
         }
-      }
-    };
-    copyRecursive(dataDir, targetWorkspace);
+      };
+      copyRecursive(dataDir, targetWorkspace);
+      console.log(`   \u2705 data files restored`);
+    }
   }
   writeAgentConfig(manifest, stageDir, targetWorkspace);
   const cronCount = restoreCronJobs(manifest, stageDir);
@@ -762,7 +747,7 @@ async function unpack(soulFile, workspacePath) {
   console.log("\u2550".repeat(50));
   console.log(`\u{1F194} Agent:      ${manifest.agent_name} (${manifest.agent_id})`);
   console.log(`\u{1F4C2} Workspace:  ${targetWorkspace}`);
-  console.log(`\u{1F4DD} Files:      ${identityCount} identity + ${memoryCount} memory + ${dataCount} data`);
+  console.log(`\u{1F4DD} Files:      ${workspaceCount} workspace files`);
   console.log(`\u23F0 Cron:       ${cronCount} job(s)`);
   if (manifest.github_repos && manifest.github_repos.length > 0) {
     console.log(`\u{1F419} Repos:      ${repoResult.cloned} cloned, ${repoResult.skipped} skipped, ${repoResult.failed} failed`);
@@ -842,17 +827,21 @@ async function inspect(soulFile) {
         console.log(`   \u2022 ${svc}`);
       }
     }
+    const workspaceFiles = manifest.files.filter((f) => f.startsWith("workspace/"));
     const identityFiles = manifest.files.filter((f) => f.startsWith("identity/"));
     const memoryFiles = manifest.files.filter((f) => f.startsWith("memory/"));
     const dataFiles = manifest.files.filter((f) => f.startsWith("data/"));
     const cronFiles = manifest.files.filter((f) => f.startsWith("cron/"));
     const configFiles = manifest.files.filter((f) => f.startsWith("config/"));
+    const credFiles = manifest.files.filter((f) => f.startsWith("credentials/"));
     console.log("\n\u{1F4CA} Contents breakdown:");
-    if (identityFiles.length > 0) console.log(`   \u{1F4DD} Identity: ${identityFiles.length} files`);
-    if (memoryFiles.length > 0) console.log(`   \u{1F9E0} Memory:   ${memoryFiles.length} files`);
-    if (dataFiles.length > 0) console.log(`   \u{1F5C4}\uFE0F  Data:     ${dataFiles.length} files`);
+    if (workspaceFiles.length > 0) console.log(`   \u{1F4C2} Workspace: ${workspaceFiles.length} files`);
+    if (identityFiles.length > 0) console.log(`   \u{1F4DD} Identity: ${identityFiles.length} files (legacy)`);
+    if (memoryFiles.length > 0) console.log(`   \u{1F9E0} Memory:   ${memoryFiles.length} files (legacy)`);
+    if (dataFiles.length > 0) console.log(`   \u{1F5C4}\uFE0F  Data:     ${dataFiles.length} files (legacy)`);
     if (cronFiles.length > 0) console.log(`   \u23F0 Cron:     ${cronFiles.length} files`);
     if (configFiles.length > 0) console.log(`   \u2699\uFE0F  Config:   ${configFiles.length} files`);
+    if (credFiles.length > 0) console.log(`   \u{1F510} Creds:    ${credFiles.length} files`);
     console.log("\u2550".repeat(50) + "\n");
   } finally {
     fs3.rmSync(tmpDir, { recursive: true });
