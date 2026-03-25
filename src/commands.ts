@@ -472,6 +472,27 @@ export async function unpack(soulFile: string, workspacePath?: string): Promise<
   // ── Step 6.5: Restore credentials ─────────────────────────────
   const credCount = restoreCredentials(stageDir);
 
+  // ── Step 6.6: Restore session history ─────────────────────────
+  console.log('💬 Restoring session history...');
+  const sessionsStageDir = path.join(stageDir, 'sessions');
+  let sessionRestoreCount = 0;
+  if (fs.existsSync(sessionsStageDir)) {
+    const targetSessionsDir = path.join(OPENCLAW_DIR, 'agents', manifest.agent_id, 'sessions');
+    fs.mkdirSync(targetSessionsDir, { recursive: true });
+    const sessionFiles = fs.readdirSync(sessionsStageDir).filter(f => f.endsWith('.jsonl'));
+    for (const f of sessionFiles) {
+      const src = path.join(sessionsStageDir, f);
+      const dst = path.join(targetSessionsDir, f);
+      if (!fs.existsSync(dst)) {
+        fs.copyFileSync(src, dst);
+        sessionRestoreCount++;
+      }
+    }
+    console.log(`   ✅ ${sessionRestoreCount} sessions restored (${sessionFiles.length - sessionRestoreCount} already existed)`);
+  } else {
+    console.log('   ⏭️  No sessions in archive');
+  }
+
   // ── Step 7: Clone GitHub repos ──────────────────────────────────
   const repoResult = cloneGitHubRepos(manifest, targetWorkspace);
 
@@ -501,6 +522,7 @@ export async function unpack(soulFile: string, workspacePath?: string): Promise<
   console.log(`📂 Workspace:  ${targetWorkspace}`);
   console.log(`📝 Files:      ${workspaceCount} workspace files`);
   console.log(`⏰ Cron:       ${cronCount} job(s)`);
+  console.log(`💬 Sessions:   ${sessionRestoreCount} restored`);
 
   if (manifest.github_repos && manifest.github_repos.length > 0) {
     console.log(`🐙 Repos:      ${repoResult.cloned} cloned, ${repoResult.skipped} skipped, ${repoResult.failed} failed`);

@@ -251,6 +251,24 @@ async function pack(agentId, outputPath) {
     allFiles.push(`cron/${f}`);
   }
   console.log(`   \u2705 ${cronFiles.length} cron files`);
+  console.log("\u{1F4AC} Collecting session history...");
+  const sessionsDir = path2.join(OPENCLAW_DIR2, "agents", agent.id, "sessions");
+  let sessionCount = 0;
+  let sessionBytes = 0;
+  if (fs2.existsSync(sessionsDir)) {
+    const sessionFiles = fs2.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
+    for (const f of sessionFiles) {
+      const src = path2.join(sessionsDir, f);
+      const dst = path2.join(stageDir, "sessions", f);
+      fs2.mkdirSync(path2.dirname(dst), { recursive: true });
+      fs2.copyFileSync(src, dst);
+      allFiles.push(`sessions/${f}`);
+      sessionCount++;
+      sessionBytes += fs2.statSync(src).size;
+    }
+  }
+  const sessionSizeMB = (sessionBytes / 1024 / 1024).toFixed(1);
+  console.log(`   \u2705 ${sessionCount} sessions (${sessionSizeMB} MB)`);
   console.log("\u{1F510} Collecting credentials...");
   const credDir = path2.join(OPENCLAW_DIR2, "credentials");
   let credCount = 0;
@@ -316,6 +334,7 @@ async function pack(agentId, outputPath) {
   console.log(`\u{1F419} Repos:    ${repos.length}`);
   console.log(`\u{1F517} Services: ${services.join(", ") || "none"}`);
   console.log(`\u{1F511} Channels: ${channelCount}`);
+  console.log(`\u{1F4AC} Sessions: ${sessionCount} (${sessionSizeMB} MB raw)`);
   console.log(`\u23F0 Cron:     ${cronJobs.length} jobs`);
   console.log(`\u{1F4C5} Packed:   ${manifest.packed_at}`);
   console.log("\u2550".repeat(50));
@@ -681,6 +700,25 @@ async function unpack(soulFile, workspacePath) {
   writeAgentConfig(manifest, stageDir, targetWorkspace);
   const cronCount = restoreCronJobs(manifest, stageDir);
   const credCount = restoreCredentials(stageDir);
+  console.log("\u{1F4AC} Restoring session history...");
+  const sessionsStageDir = path3.join(stageDir, "sessions");
+  let sessionRestoreCount = 0;
+  if (fs3.existsSync(sessionsStageDir)) {
+    const targetSessionsDir = path3.join(OPENCLAW_DIR3, "agents", manifest.agent_id, "sessions");
+    fs3.mkdirSync(targetSessionsDir, { recursive: true });
+    const sessionFiles = fs3.readdirSync(sessionsStageDir).filter((f) => f.endsWith(".jsonl"));
+    for (const f of sessionFiles) {
+      const src = path3.join(sessionsStageDir, f);
+      const dst = path3.join(targetSessionsDir, f);
+      if (!fs3.existsSync(dst)) {
+        fs3.copyFileSync(src, dst);
+        sessionRestoreCount++;
+      }
+    }
+    console.log(`   \u2705 ${sessionRestoreCount} sessions restored (${sessionFiles.length - sessionRestoreCount} already existed)`);
+  } else {
+    console.log("   \u23ED\uFE0F  No sessions in archive");
+  }
   const repoResult = cloneGitHubRepos(manifest, targetWorkspace);
   fs3.rmSync(tmpDir, { recursive: true });
   let gatewayStarted = false;
@@ -702,6 +740,7 @@ async function unpack(soulFile, workspacePath) {
   console.log(`\u{1F4C2} Workspace:  ${targetWorkspace}`);
   console.log(`\u{1F4DD} Files:      ${workspaceCount} workspace files`);
   console.log(`\u23F0 Cron:       ${cronCount} job(s)`);
+  console.log(`\u{1F4AC} Sessions:   ${sessionRestoreCount} restored`);
   if (manifest.github_repos && manifest.github_repos.length > 0) {
     console.log(`\u{1F419} Repos:      ${repoResult.cloned} cloned, ${repoResult.skipped} skipped, ${repoResult.failed} failed`);
   }

@@ -97,7 +97,27 @@ export async function pack(agentId?: string, outputPath?: string): Promise<void>
   }
   console.log(`   ✅ ${cronFiles.length} cron files`);
 
-  // 5.5. Collect credentials (pairing records, allowFrom lists)
+  // 5.5. Collect session history
+  console.log('💬 Collecting session history...');
+  const sessionsDir = path.join(OPENCLAW_DIR, 'agents', agent.id, 'sessions');
+  let sessionCount = 0;
+  let sessionBytes = 0;
+  if (fs.existsSync(sessionsDir)) {
+    const sessionFiles = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.jsonl'));
+    for (const f of sessionFiles) {
+      const src = path.join(sessionsDir, f);
+      const dst = path.join(stageDir, 'sessions', f);
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.copyFileSync(src, dst);
+      allFiles.push(`sessions/${f}`);
+      sessionCount++;
+      sessionBytes += fs.statSync(src).size;
+    }
+  }
+  const sessionSizeMB = (sessionBytes / 1024 / 1024).toFixed(1);
+  console.log(`   ✅ ${sessionCount} sessions (${sessionSizeMB} MB)`);
+
+  // 5.6. Collect credentials (pairing records, allowFrom lists)
   console.log('🔐 Collecting credentials...');
   const credDir = path.join(OPENCLAW_DIR, 'credentials');
   let credCount = 0;
@@ -184,6 +204,7 @@ export async function pack(agentId?: string, outputPath?: string): Promise<void>
   console.log(`🐙 Repos:    ${repos.length}`);
   console.log(`🔗 Services: ${services.join(', ') || 'none'}`);
   console.log(`🔑 Channels: ${channelCount}`);
+  console.log(`💬 Sessions: ${sessionCount} (${sessionSizeMB} MB raw)`);
   console.log(`⏰ Cron:     ${cronJobs.length} jobs`);
   console.log(`📅 Packed:   ${manifest.packed_at}`);
   console.log('═'.repeat(50));
