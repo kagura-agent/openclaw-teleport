@@ -859,9 +859,360 @@ async function inspect(soulFile) {
   }
 }
 
+// src/snapshot.ts
+import * as fs4 from "node:fs";
+import * as path4 from "node:path";
+import * as os4 from "node:os";
+import { execSync as execSync4 } from "node:child_process";
+var OPENCLAW_DIR4 = path4.join(os4.homedir(), ".openclaw");
+var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "__pycache__", ".venv", "backups"]);
+function isGitRepo2(dirPath) {
+  return fs4.existsSync(path4.join(dirPath, ".git"));
+}
+function collectWorkspaceRepoPaths(config) {
+  const repoPaths = /* @__PURE__ */ new Set();
+  const agents = config.agents?.list ?? [];
+  for (const agent of agents) {
+    if (!agent.workspace || !fs4.existsSync(agent.workspace)) continue;
+    try {
+      const entries = fs4.readdirSync(agent.workspace, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const fullPath = path4.join(agent.workspace, entry.name);
+        if (isGitRepo2(fullPath)) {
+          repoPaths.add(fullPath);
+        }
+      }
+    } catch {
+    }
+  }
+  return repoPaths;
+}
+function collectOpenClawFiles(repoAbsPaths) {
+  const files = [];
+  const walk = (dir, prefix) => {
+    let entries;
+    try {
+      entries = fs4.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (SKIP_DIRS2.has(entry.name)) continue;
+      const fullPath = path4.join(dir, entry.name);
+      const rel = prefix ? path4.join(prefix, entry.name) : entry.name;
+      if (entry.isDirectory()) {
+        if (repoAbsPaths.has(fullPath)) continue;
+        walk(fullPath, rel);
+      } else if (entry.isFile()) {
+        files.push(rel);
+      }
+    }
+  };
+  walk(OPENCLAW_DIR4, "");
+  return files;
+}
+function replacePathsInObject(obj, oldStr, newStr) {
+  if (typeof obj === "string") {
+    return obj.split(oldStr).join(newStr);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => replacePathsInObject(item, oldStr, newStr));
+  }
+  if (obj !== null && typeof obj === "object") {
+    const result = {};
+    for (const [key, val] of Object.entries(obj)) {
+      result[key] = replacePathsInObject(val, oldStr, newStr);
+    }
+    return result;
+  }
+  return obj;
+}
+async function snapshotPack(outputPath) {
+  console.log("\n\u{1F338} openclaw-teleport \u2014 packing full instance snapshot...\n");
+  const config = loadConfig();
+  const configRaw = fs4.readFileSync(path4.join(OPENCLAW_DIR4, "openclaw.json"), "utf-8");
+  const openclawConfig = JSON.parse(configRaw);
+  const agents = config.agents?.list ?? [];
+  console.log(`\u{1F4E6} OpenClaw instance: ${OPENCLAW_DIR4}`);
+  console.log(`\u{1F916} Agents: ${agents.length}`);
+  const repoAbsPaths = collectWorkspaceRepoPaths(config);
+  console.log("\n\u{1F4C2} Collecting files...");
+  const allFiles = collectOpenClawFiles(repoAbsPaths);
+  console.log(`   \u2705 ${allFiles.length} files collected`);
+  if (repoAbsPaths.size > 0) {
+    console.log(`   \u23ED\uFE0F  Skipped ${repoAbsPaths.size} git repo(s) in workspaces (will clone on restore)`);
+  }
+  const envPath = path4.join(OPENCLAW_DIR4, ".env");
+  const hasEnv = fs4.existsSync(envPath);
+  if (hasEnv && !allFiles.includes(".env")) {
+    console.log("   \u2705 .env file included");
+  }
+  console.log("\n\u{1F419} Detecting workspace repos...");
+  const agentEntries = [];
+  for (const agent of agents) {
+    const workspaceRel = agent.workspace.startsWith(os4.homedir()) ? path4.relative(os4.homedir(), agent.workspace) : agent.workspace;
+    let repos = [];
+    if (agent.workspace && fs4.existsSync(agent.workspace)) {
+      repos = detectWorkspaceRepos(agent.workspace);
+    }
+    agentEntries.push({
+      id: agent.id,
+      name: agent.name,
+      workspace_path: workspaceRel,
+      repos
+    });
+    if (repos.length > 0) {
+      console.log(`   \u{1F4E6} ${agent.name}: ${repos.length} repo(s)`);
+      for (const r of repos) {
+        console.log(`      \u2022 ${r.name} \u2014 ${r.url}`);
+      }
+    }
+  }
+  const manifest = {
+    snapshot_version: "1.0",
+    packed_at: (/* @__PURE__ */ new Date()).toISOString(),
+    hostname: os4.hostname(),
+    home_dir: os4.homedir(),
+    openclaw_config: openclawConfig,
+    agents: agentEntries,
+    files: allFiles
+  };
+  const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10).replace(/-/g, "");
+  const snapshotName = `openclaw_${date}`;
+  const tmpDir = path4.join(os4.tmpdir(), `openclaw-snapshot-${Date.now()}`);
+  const stageDir = path4.join(tmpDir, "snapshot");
+  if (fs4.existsSync(tmpDir)) {
+    fs4.rmSync(tmpDir, { recursive: true });
+  }
+  fs4.mkdirSync(stageDir, { recursive: true });
+  console.log("\n\u{1F4CB} Staging files...");
+  for (const f of allFiles) {
+    const src = path4.join(OPENCLAW_DIR4, f);
+    const dst = path4.join(stageDir, f);
+    fs4.mkdirSync(path4.dirname(dst), { recursive: true });
+    fs4.copyFileSync(src, dst);
+  }
+  fs4.writeFileSync(path4.join(stageDir, "manifest.json"), JSON.stringify(manifest, null, 2));
+  let outputFile;
+  if (outputPath) {
+    outputFile = path4.resolve(outputPath);
+  } else {
+    const backupDir = path4.join(OPENCLAW_DIR4, "backups");
+    fs4.mkdirSync(backupDir, { recursive: true });
+    outputFile = path4.join(backupDir, `${snapshotName}.snapshot`);
+  }
+  console.log("\u{1F4E6} Creating snapshot archive...");
+  execSync4(`tar -czf "${outputFile}" -C "${tmpDir}" snapshot`, {
+    encoding: "utf-8"
+  });
+  fs4.rmSync(tmpDir, { recursive: true });
+  const stats = fs4.statSync(outputFile);
+  const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
+  console.log("\n" + "\u2550".repeat(50));
+  console.log("\u{1F338} Snapshot packed successfully!");
+  console.log("\u2550".repeat(50));
+  console.log(`\u{1F4E6} File:     ${outputFile}`);
+  console.log(`\u{1F4CF} Size:     ${sizeMB} MB`);
+  console.log(`\u{1F916} Agents:   ${agentEntries.length}`);
+  console.log(`\u{1F4DD} Files:    ${allFiles.length}`);
+  console.log(`\u{1F419} Repos:    ${agentEntries.reduce((n, a) => n + a.repos.length, 0)}`);
+  console.log(`\u{1F5A5}\uFE0F  Host:     ${manifest.hostname}`);
+  console.log(`\u{1F4C5} Packed:   ${manifest.packed_at}`);
+  console.log("\u2550".repeat(50));
+  console.log("\n\u26A0\uFE0F  SECURITY WARNING: The snapshot contains credentials,");
+  console.log("   API tokens, and config. Treat it like a password file.");
+  console.log("   Do NOT commit it to git or share publicly.\n");
+}
+async function snapshotRestore(snapshotFile, opts) {
+  console.log("\n\u{1F338} openclaw-teleport \u2014 restoring instance snapshot...\n");
+  if (!fs4.existsSync(snapshotFile)) {
+    throw new Error(`\u274C File not found: ${snapshotFile}`);
+  }
+  if (fs4.existsSync(OPENCLAW_DIR4) && !opts.force) {
+    throw new Error(
+      `\u274C ${OPENCLAW_DIR4} already exists.
+   Use --force to overwrite the existing installation.`
+    );
+  }
+  const tmpDir = path4.join(os4.tmpdir(), `openclaw-snapshot-restore-${Date.now()}`);
+  fs4.mkdirSync(tmpDir, { recursive: true });
+  console.log("\u{1F4E6} Extracting snapshot...");
+  execSync4(`tar -xzf "${path4.resolve(snapshotFile)}" -C "${tmpDir}"`, {
+    encoding: "utf-8"
+  });
+  const stageDir = path4.join(tmpDir, "snapshot");
+  const manifestPath = path4.join(stageDir, "manifest.json");
+  if (!fs4.existsSync(manifestPath)) {
+    fs4.rmSync(tmpDir, { recursive: true });
+    throw new Error("\u274C Invalid snapshot file: manifest.json not found");
+  }
+  const manifest = JSON.parse(fs4.readFileSync(manifestPath, "utf-8"));
+  console.log(`\u{1F5A5}\uFE0F  Origin:   ${manifest.hostname}`);
+  console.log(`\u{1F4C5} Packed:   ${manifest.packed_at}`);
+  console.log(`\u{1F916} Agents:   ${manifest.agents.length}`);
+  console.log(`\u{1F4DD} Files:    ${manifest.files.length}`);
+  console.log("\n\u{1F4C2} Restoring files...");
+  fs4.mkdirSync(OPENCLAW_DIR4, { recursive: true });
+  let fileCount = 0;
+  for (const f of manifest.files) {
+    const src = path4.join(stageDir, f);
+    const dst = path4.join(OPENCLAW_DIR4, f);
+    if (fs4.existsSync(src)) {
+      fs4.mkdirSync(path4.dirname(dst), { recursive: true });
+      fs4.copyFileSync(src, dst);
+      fileCount++;
+    }
+  }
+  console.log(`   \u2705 ${fileCount} files restored`);
+  const oldHome = manifest.home_dir;
+  const newHome = os4.homedir();
+  if (oldHome !== newHome) {
+    console.log(`
+\u{1F527} Adjusting paths: ${oldHome} \u2192 ${newHome}`);
+    const configPath = path4.join(OPENCLAW_DIR4, "openclaw.json");
+    if (fs4.existsSync(configPath)) {
+      const raw = JSON.parse(fs4.readFileSync(configPath, "utf-8"));
+      const updated = replacePathsInObject(raw, oldHome, newHome);
+      fs4.writeFileSync(configPath, JSON.stringify(updated, null, 2));
+      console.log("   \u2705 openclaw.json paths updated");
+    }
+  } else {
+    console.log("\n\u{1F527} Same home directory \u2014 no path adjustment needed");
+  }
+  let totalCloned = 0;
+  let totalSkipped = 0;
+  let totalFailed = 0;
+  if (manifest.agents.some((a) => a.repos.length > 0)) {
+    console.log("\n\u{1F419} Cloning workspace repos...");
+    if (!commandExists("git")) {
+      console.log("   \u26A0\uFE0F  git not found \u2014 repos must be cloned manually:");
+      for (const agent of manifest.agents) {
+        for (const repo of agent.repos) {
+          const wsPath = path4.join(newHome, agent.workspace_path);
+          console.log(`     git clone ${repo.url} ${path4.join(wsPath, repo.relativePath)}`);
+        }
+      }
+      totalFailed = manifest.agents.reduce((n, a) => n + a.repos.length, 0);
+    } else {
+      for (const agent of manifest.agents) {
+        const wsPath = path4.join(newHome, agent.workspace_path);
+        for (const repo of agent.repos) {
+          const targetDir = path4.join(wsPath, repo.relativePath);
+          if (fs4.existsSync(targetDir)) {
+            console.log(`   \u23ED\uFE0F  ${repo.name} (already exists)`);
+            totalSkipped++;
+            continue;
+          }
+          try {
+            fs4.mkdirSync(path4.dirname(targetDir), { recursive: true });
+            console.log(`   \u{1F4E5} Cloning ${repo.name} \u2192 ${repo.relativePath}...`);
+            execSync4(`git clone "${repo.url}" "${targetDir}"`, {
+              encoding: "utf-8",
+              timeout: 12e4,
+              stdio: "pipe"
+            });
+            console.log(`   \u2705 ${repo.name}`);
+            totalCloned++;
+          } catch {
+            console.log(`   \u26A0\uFE0F  Failed to clone ${repo.name} (${repo.url})`);
+            totalFailed++;
+          }
+        }
+      }
+    }
+  }
+  fs4.rmSync(tmpDir, { recursive: true });
+  let gatewayStarted = false;
+  if (commandExists("openclaw")) {
+    console.log("\n\u{1F680} Starting OpenClaw Gateway...");
+    try {
+      execSync4("openclaw gateway start", {
+        encoding: "utf-8",
+        timeout: 3e4,
+        stdio: "pipe"
+      });
+      console.log("   \u2705 Gateway started");
+      gatewayStarted = true;
+    } catch {
+      console.log("   \u26A0\uFE0F  Failed to start gateway");
+      console.log("      Try manually: openclaw gateway start");
+    }
+  }
+  const totalRepos = manifest.agents.reduce((n, a) => n + a.repos.length, 0);
+  console.log("\n" + "\u2550".repeat(50));
+  console.log("\u{1F338} Snapshot Restoration Summary");
+  console.log("\u2550".repeat(50));
+  console.log(`\u{1F4C2} Target:    ${OPENCLAW_DIR4}`);
+  console.log(`\u{1F4DD} Files:     ${fileCount} restored`);
+  console.log(`\u{1F916} Agents:    ${manifest.agents.length}`);
+  if (totalRepos > 0) {
+    console.log(`\u{1F419} Repos:     ${totalCloned} cloned, ${totalSkipped} skipped, ${totalFailed} failed`);
+  }
+  console.log(`\u{1F527} Paths:     ${oldHome !== newHome ? "adjusted" : "unchanged"}`);
+  console.log(`\u{1F680} Gateway:   ${gatewayStarted ? "\u2705 running" : "\u26A0\uFE0F  not started"}`);
+  console.log("\u2550".repeat(50));
+  console.log("Instance restored successfully \u{1F338}");
+  console.log("\u2550".repeat(50) + "\n");
+}
+async function snapshotInspect(snapshotFile) {
+  if (!fs4.existsSync(snapshotFile)) {
+    throw new Error(`\u274C File not found: ${snapshotFile}`);
+  }
+  const tmpDir = path4.join(os4.tmpdir(), `openclaw-snapshot-inspect-${Date.now()}`);
+  fs4.mkdirSync(tmpDir, { recursive: true });
+  try {
+    execSync4(`tar -xzf "${path4.resolve(snapshotFile)}" -C "${tmpDir}" snapshot/manifest.json`, {
+      encoding: "utf-8"
+    });
+    const manifestPath = path4.join(tmpDir, "snapshot", "manifest.json");
+    if (!fs4.existsSync(manifestPath)) {
+      throw new Error("\u274C Invalid snapshot file: manifest.json not found");
+    }
+    const manifest = JSON.parse(fs4.readFileSync(manifestPath, "utf-8"));
+    const stats = fs4.statSync(path4.resolve(snapshotFile));
+    const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
+    const totalRepos = manifest.agents.reduce((n, a) => n + a.repos.length, 0);
+    console.log("\n" + "\u2550".repeat(50));
+    console.log("\u{1F338} Snapshot Inspection");
+    console.log("\u2550".repeat(50));
+    console.log(`\u{1F5A5}\uFE0F  Hostname: ${manifest.hostname}`);
+    console.log(`\u{1F4C5} Packed:   ${manifest.packed_at}`);
+    console.log(`\u{1F4CF} Size:     ${sizeMB} MB`);
+    console.log(`\u{1F916} Agents:   ${manifest.agents.length}`);
+    console.log(`\u{1F4DD} Files:    ${manifest.files.length}`);
+    console.log(`\u{1F419} Repos:    ${totalRepos}`);
+    if (manifest.agents.length > 0) {
+      console.log(`
+\u{1F916} Agents:`);
+      for (const agent of manifest.agents) {
+        console.log(`   \u2022 ${agent.name} (${agent.id})`);
+        console.log(`     Workspace: ~/${agent.workspace_path}`);
+        if (agent.repos.length > 0) {
+          for (const repo of agent.repos) {
+            console.log(`     \u{1F419} ${repo.name} \u2014 ${repo.url}`);
+          }
+        }
+      }
+    }
+    const byTopDir = {};
+    for (const f of manifest.files) {
+      const topDir = f.includes("/") ? f.split("/")[0] : "(root)";
+      byTopDir[topDir] = (byTopDir[topDir] ?? 0) + 1;
+    }
+    console.log("\n\u{1F4CA} Contents breakdown:");
+    for (const [dir, count] of Object.entries(byTopDir).sort((a, b) => b[1] - a[1])) {
+      console.log(`   \u{1F4C2} ${dir}: ${count} files`);
+    }
+    console.log("\u2550".repeat(50) + "\n");
+  } finally {
+    fs4.rmSync(tmpDir, { recursive: true });
+  }
+}
+
 // src/cli.ts
 var program = new Command();
-program.name("openclaw-teleport").description("\u{1F338} Agent soul migration \u2014 pack your identity, memory, and tools into one file").version("0.2.0");
+program.name("openclaw-teleport").description("\u{1F338} Agent soul migration \u2014 pack your identity, memory, and tools into one file").version("0.5.0");
 program.command("pack").description("Pack an agent into a .soul archive").argument("[agent-id]", "Agent ID to pack (defaults to first configured agent)").option("-o, --output <path>", "Output file path (default: ./{agent}_{date}.soul)").action(async (agentId, opts) => {
   try {
     await pack(agentId, opts.output);
@@ -885,6 +1236,37 @@ ${err instanceof Error ? err.message : String(err)}
 program.command("inspect").description("Inspect a .soul archive without unpacking").argument("<file>", "Path to .soul file").action(async (file) => {
   try {
     await inspect(file);
+  } catch (err) {
+    console.error(`
+${err instanceof Error ? err.message : String(err)}
+`);
+    process.exit(1);
+  }
+});
+var snapshot = program.command("snapshot").description("Snapshot the entire OpenClaw instance (~/.openclaw/)");
+snapshot.command("pack").description("Pack the entire ~/.openclaw/ directory into a .snapshot archive").option("-o, --output <path>", "Output file path (default: ./openclaw_YYYYMMDD.snapshot)").action(async (opts) => {
+  try {
+    await snapshotPack(opts.output);
+  } catch (err) {
+    console.error(`
+${err instanceof Error ? err.message : String(err)}
+`);
+    process.exit(1);
+  }
+});
+snapshot.command("restore").description("Restore an OpenClaw instance from a .snapshot archive").argument("<file>", "Path to .snapshot file").option("--force", "Overwrite existing ~/.openclaw/ directory").action(async (file, opts) => {
+  try {
+    await snapshotRestore(file, { force: opts.force });
+  } catch (err) {
+    console.error(`
+${err instanceof Error ? err.message : String(err)}
+`);
+    process.exit(1);
+  }
+});
+snapshot.command("inspect").description("Inspect a .snapshot archive without restoring").argument("<file>", "Path to .snapshot file").action(async (file) => {
+  try {
+    await snapshotInspect(file);
   } catch (err) {
     console.error(`
 ${err instanceof Error ? err.message : String(err)}
