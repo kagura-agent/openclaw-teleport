@@ -7,7 +7,7 @@ import {
   findAgent,
   collectWorkspaceFiles,
   collectCronFiles,
-  getGitHubRepos,
+  detectWorkspaceRepos,
   detectServices,
   extractAgentConfig,
   extractChannelsConfig,
@@ -134,14 +134,24 @@ export async function pack(agentId?: string, outputPath?: string): Promise<void>
   }
   console.log(`   ✅ ${credCount} credential files`);
 
+  // Also collect ~/.openclaw/.env if it exists
+  const envFile = path.join(OPENCLAW_DIR, '.env');
+  if (fs.existsSync(envFile)) {
+    const dst = path.join(stageDir, 'credentials', '.env');
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.copyFileSync(envFile, dst);
+    allFiles.push('credentials/.env');
+    console.log('   ✅ .env file collected');
+  }
+
   // 6. Load full cron job content for this agent
   console.log('⏰ Extracting cron job definitions...');
   const cronJobs = loadCronJobs(agent.id);
   console.log(`   ✅ ${cronJobs.length} cron jobs for ${agent.id}`);
 
-  // 7. Get GitHub repos
-  console.log('🐙 Fetching GitHub repos...');
-  const repos = getGitHubRepos('kagura-agent');
+  // 7. Detect workspace repos (git subdirs)
+  console.log('🐙 Detecting workspace repos...');
+  const repos = detectWorkspaceRepos(agent.workspace);
   console.log(`   ✅ ${repos.length} repos found`);
 
   // 8. Detect services
@@ -160,6 +170,25 @@ export async function pack(agentId?: string, outputPath?: string): Promise<void>
   const bindingsConfig = config.bindings ?? [];
   const gatewayConfig = config.gateway ?? {};
 
+  // 10.5. Detect extraDirs and convert workspace-relative paths
+  const extraDirsRelative: string[] = [];
+  const skillsConfig = (config as Record<string, unknown>).skills as Record<string, unknown> | undefined;
+  const loadConfig2 = skillsConfig?.load as Record<string, unknown> | undefined;
+  const extraDirs = loadConfig2?.extraDirs as string[] | undefined;
+  if (extraDirs && Array.isArray(extraDirs)) {
+    for (const dir of extraDirs) {
+      const resolvedDir = path.resolve(dir);
+      const resolvedWorkspace = path.resolve(agent.workspace);
+      if (resolvedDir.startsWith(resolvedWorkspace + path.sep)) {
+        const rel = path.relative(resolvedWorkspace, resolvedDir);
+        extraDirsRelative.push(rel);
+        console.log(`   📁 extraDir (workspace-relative): ${rel}`);
+      } else {
+        console.log(`   ⚠️  extraDir outside workspace (not portable): ${dir}`);
+      }
+    }
+  }
+
   // 11. Generate manifest
   const manifest: Manifest = {
     agent_id: agent.id,
@@ -167,6 +196,7 @@ export async function pack(agentId?: string, outputPath?: string): Promise<void>
     packed_at: new Date().toISOString(),
     files: allFiles,
     github_repos: repos,
+    extra_dirs_relative: extraDirsRelative.length > 0 ? extraDirsRelative : undefined,
     services_to_rebind: services,
     channels: channelsConfig,
     cron_jobs: cronJobs,

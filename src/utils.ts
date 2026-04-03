@@ -23,7 +23,9 @@ export interface Manifest {
   agent_name: string;
   packed_at: string;
   files: string[];
-  github_repos: Array<{ name: string; url: string; isFork: boolean }>;
+  github_repos: Array<{ name: string; url: string; relativePath: string }>;
+  /** Relative paths for skills.load.extraDirs inside workspace */
+  extra_dirs_relative?: string[];
   services_to_rebind: string[];
   /** Channel configurations with credentials (added in v0.2) */
   channels?: Record<string, unknown>;
@@ -174,19 +176,48 @@ export function loadCronJobs(agentId: string): CronJob[] {
   }
 }
 
-// ── GitHub repos ───────────────────────────────────────────────────
+// ── Workspace repo detection ───────────────────────────────────────
 
-export function getGitHubRepos(owner: string): Array<{ name: string; url: string; isFork: boolean }> {
+/**
+ * Scan the workspace for subdirectories that contain a `.git` folder
+ * and return their name, remote URL, and relative path.
+ */
+export function detectWorkspaceRepos(workspace: string): Array<{ name: string; url: string; relativePath: string }> {
+  const repos: Array<{ name: string; url: string; relativePath: string }> = [];
+
+  let entries: fs.Dirent[];
   try {
-    const output = execSync(`gh repo list ${owner} --json name,url,isFork --limit 100`, {
-      encoding: 'utf-8',
-      timeout: 30000,
-    });
-    return JSON.parse(output);
-  } catch (err) {
-    console.log('⚠️  Could not fetch GitHub repos (gh CLI not available or not authenticated)');
-    return [];
+    entries = fs.readdirSync(workspace, { withFileTypes: true });
+  } catch {
+    return repos;
   }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const fullPath = path.join(workspace, entry.name);
+    if (!fs.existsSync(path.join(fullPath, '.git'))) continue;
+
+    let url = '';
+    try {
+      url = execSync('git remote get-url origin', {
+        cwd: fullPath,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 10000,
+      }).trim();
+    } catch {
+      // Repo without a remote — skip
+      continue;
+    }
+
+    repos.push({
+      name: entry.name,
+      url,
+      relativePath: entry.name,
+    });
+  }
+
+  return repos;
 }
 
 // ── Services detection ─────────────────────────────────────────────
@@ -282,48 +313,6 @@ export function sanitizeAgentDefaults(defaults: Record<string, unknown>): Record
 export function commandExists(cmd: string): boolean {
   try {
     execSync(`which ${cmd}`, { encoding: 'utf-8', stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Install GitHub CLI (gh) automatically.
- * Supports apt (Debian/Ubuntu) and brew (macOS).
- */
-export function installGh(): boolean {
-  try {
-    const platform = os.platform();
-    if (platform === 'linux') {
-      // Try apt-based install (Debian/Ubuntu)
-      execSync(
-        '(type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) && ' +
-        'sudo mkdir -p -m 755 /etc/apt/keyrings && ' +
-        'wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && ' +
-        'sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && ' +
-        'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && ' +
-        'sudo apt update && sudo apt install gh -y',
-        { stdio: 'pipe', timeout: 120000 }
-      );
-    } else if (platform === 'darwin') {
-      execSync('brew install gh', { stdio: 'pipe', timeout: 120000 });
-    } else {
-      return false;
-    }
-    return commandExists('gh');
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Check GitHub CLI auth status.
- * Returns true if authenticated.
- */
-export function isGhAuthenticated(): boolean {
-  try {
-    execSync('gh auth status', { encoding: 'utf-8', stdio: 'pipe' });
     return true;
   } catch {
     return false;

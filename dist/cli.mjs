@@ -89,17 +89,36 @@ function loadCronJobs(agentId) {
     return [];
   }
 }
-function getGitHubRepos(owner) {
+function detectWorkspaceRepos(workspace) {
+  const repos = [];
+  let entries;
   try {
-    const output = execSync(`gh repo list ${owner} --json name,url,isFork --limit 100`, {
-      encoding: "utf-8",
-      timeout: 3e4
-    });
-    return JSON.parse(output);
-  } catch (err) {
-    console.log("\u26A0\uFE0F  Could not fetch GitHub repos (gh CLI not available or not authenticated)");
-    return [];
+    entries = fs.readdirSync(workspace, { withFileTypes: true });
+  } catch {
+    return repos;
   }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const fullPath = path.join(workspace, entry.name);
+    if (!fs.existsSync(path.join(fullPath, ".git"))) continue;
+    let url = "";
+    try {
+      url = execSync("git remote get-url origin", {
+        cwd: fullPath,
+        encoding: "utf-8",
+        stdio: "pipe",
+        timeout: 1e4
+      }).trim();
+    } catch {
+      continue;
+    }
+    repos.push({
+      name: entry.name,
+      url,
+      relativePath: entry.name
+    });
+  }
+  return repos;
 }
 function detectServices(config) {
   const services = /* @__PURE__ */ new Set();
@@ -154,32 +173,6 @@ function sanitizeAgentDefaults(defaults) {
 function commandExists(cmd) {
   try {
     execSync(`which ${cmd}`, { encoding: "utf-8", stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-function installGh() {
-  try {
-    const platform2 = os.platform();
-    if (platform2 === "linux") {
-      execSync(
-        '(type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) && sudo mkdir -p -m 755 /etc/apt/keyrings && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && sudo apt update && sudo apt install gh -y',
-        { stdio: "pipe", timeout: 12e4 }
-      );
-    } else if (platform2 === "darwin") {
-      execSync("brew install gh", { stdio: "pipe", timeout: 12e4 });
-    } else {
-      return false;
-    }
-    return commandExists("gh");
-  } catch {
-    return false;
-  }
-}
-function isGhAuthenticated() {
-  try {
-    execSync("gh auth status", { encoding: "utf-8", stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -284,11 +277,19 @@ async function pack(agentId, outputPath) {
     }
   }
   console.log(`   \u2705 ${credCount} credential files`);
+  const envFile = path2.join(OPENCLAW_DIR2, ".env");
+  if (fs2.existsSync(envFile)) {
+    const dst = path2.join(stageDir, "credentials", ".env");
+    fs2.mkdirSync(path2.dirname(dst), { recursive: true });
+    fs2.copyFileSync(envFile, dst);
+    allFiles.push("credentials/.env");
+    console.log("   \u2705 .env file collected");
+  }
   console.log("\u23F0 Extracting cron job definitions...");
   const cronJobs = loadCronJobs(agent.id);
   console.log(`   \u2705 ${cronJobs.length} cron jobs for ${agent.id}`);
-  console.log("\u{1F419} Fetching GitHub repos...");
-  const repos = getGitHubRepos("kagura-agent");
+  console.log("\u{1F419} Detecting workspace repos...");
+  const repos = detectWorkspaceRepos(agent.workspace);
   console.log(`   \u2705 ${repos.length} repos found`);
   const services = detectServices(config);
   console.log(`\u{1F517} Services to rebind: ${services.length > 0 ? services.join(", ") : "none"}`);
@@ -300,12 +301,30 @@ async function pack(agentId, outputPath) {
   const modelsConfig = config.models ?? {};
   const bindingsConfig = config.bindings ?? [];
   const gatewayConfig = config.gateway ?? {};
+  const extraDirsRelative = [];
+  const skillsConfig = config.skills;
+  const loadConfig22 = skillsConfig?.load;
+  const extraDirs = loadConfig22?.extraDirs;
+  if (extraDirs && Array.isArray(extraDirs)) {
+    for (const dir of extraDirs) {
+      const resolvedDir = path2.resolve(dir);
+      const resolvedWorkspace = path2.resolve(agent.workspace);
+      if (resolvedDir.startsWith(resolvedWorkspace + path2.sep)) {
+        const rel = path2.relative(resolvedWorkspace, resolvedDir);
+        extraDirsRelative.push(rel);
+        console.log(`   \u{1F4C1} extraDir (workspace-relative): ${rel}`);
+      } else {
+        console.log(`   \u26A0\uFE0F  extraDir outside workspace (not portable): ${dir}`);
+      }
+    }
+  }
   const manifest = {
     agent_id: agent.id,
     agent_name: agent.name,
     packed_at: (/* @__PURE__ */ new Date()).toISOString(),
     files: allFiles,
     github_repos: repos,
+    extra_dirs_relative: extraDirsRelative.length > 0 ? extraDirsRelative : void 0,
     services_to_rebind: services,
     channels: channelsConfig,
     cron_jobs: cronJobs,
@@ -478,6 +497,20 @@ function writeAgentConfig(manifest, stageDir, targetWorkspace) {
       existingConfig.gateway = { ...existingConfig.gateway ?? {}, ...manifest.gateway };
       console.log("   \u2705 Gateway config restored");
     }
+    if (manifest.extra_dirs_relative && manifest.extra_dirs_relative.length > 0) {
+      const absoluteDirs = manifest.extra_dirs_relative.map((rel) => path3.join(targetWorkspace, rel));
+      if (!existingConfig.skills) {
+        existingConfig.skills = { load: { extraDirs: absoluteDirs } };
+      } else {
+        const skills = existingConfig.skills;
+        if (!skills.load) {
+          skills.load = { extraDirs: absoluteDirs };
+        } else {
+          skills.load.extraDirs = absoluteDirs;
+        }
+      }
+      console.log(`   \u2705 extraDirs restored: ${absoluteDirs.join(", ")}`);
+    }
     fs3.writeFileSync(CONFIG_PATH2, JSON.stringify(existingConfig, null, 2));
   } else {
     const newConfig = {
@@ -504,6 +537,11 @@ function writeAgentConfig(manifest, stageDir, targetWorkspace) {
     if (manifest.gateway && Object.keys(manifest.gateway).length > 0) {
       newConfig.gateway = manifest.gateway;
       console.log("   \u2705 Gateway config restored");
+    }
+    if (manifest.extra_dirs_relative && manifest.extra_dirs_relative.length > 0) {
+      const absoluteDirs = manifest.extra_dirs_relative.map((rel) => path3.join(targetWorkspace, rel));
+      newConfig.skills = { load: { extraDirs: absoluteDirs } };
+      console.log(`   \u2705 extraDirs restored: ${absoluteDirs.join(", ")}`);
     }
     fs3.writeFileSync(CONFIG_PATH2, JSON.stringify(newConfig, null, 2));
     console.log("   \u2705 New openclaw.json created");
@@ -565,56 +603,44 @@ function restoreCredentials(stageDir) {
     fs3.copyFileSync(path3.join(credSrc, f), path3.join(credDst, f));
   }
   console.log(`   \u2705 ${files.length} credential file(s) restored`);
+  const envSrc = path3.join(credSrc, ".env");
+  if (fs3.existsSync(envSrc)) {
+    const envDst = path3.join(OPENCLAW_DIR3, ".env");
+    if (!fs3.existsSync(envDst)) {
+      fs3.copyFileSync(envSrc, envDst);
+      console.log("   \u2705 .env file restored");
+    } else {
+      console.log("   \u23ED\uFE0F  .env already exists, skipping");
+    }
+  }
   return files.length;
 }
-function cloneGitHubRepos(manifest, targetWorkspace) {
+function cloneWorkspaceRepos(manifest, targetWorkspace) {
   const result = { cloned: 0, skipped: 0, failed: 0 };
   if (!manifest.github_repos || manifest.github_repos.length === 0) {
     return result;
   }
-  console.log("\n\u{1F419} Cloning GitHub repos...");
-  if (!commandExists("gh")) {
-    console.log("   \u2B07\uFE0F  GitHub CLI (gh) not found, installing...");
-    const installed = installGh();
-    if (!installed) {
-      console.log("   \u26A0\uFE0F  Could not auto-install GitHub CLI");
-      console.log("   Install manually: https://cli.github.com/");
-      console.log(`   Repos to clone manually (${manifest.github_repos.length}):`);
-      for (const repo of manifest.github_repos) {
-        console.log(`     git clone ${repo.url}`);
-      }
-      result.failed = manifest.github_repos.length;
-      return result;
-    }
-    console.log("   \u2705 GitHub CLI installed");
-  }
-  if (!isGhAuthenticated()) {
-    console.log("   \u26A0\uFE0F  GitHub CLI not authenticated");
-    console.log("");
-    console.log("   \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
-    console.log("   \u2502  Please run:  gh auth login                  \u2502");
-    console.log("   \u2502                                              \u2502");
-    console.log("   \u2502  Then re-run unpack, or clone manually:      \u2502");
-    console.log("   \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
-    console.log("");
+  console.log("\n\u{1F419} Cloning workspace repos...");
+  if (!commandExists("git")) {
+    console.log("   \u26A0\uFE0F  git not found");
+    console.log(`   Repos to clone manually (${manifest.github_repos.length}):`);
     for (const repo of manifest.github_repos) {
-      const fork = repo.isFork ? " (fork)" : "";
-      console.log(`   \u2022 ${repo.name}${fork}: ${repo.url}`);
+      console.log(`     git clone ${repo.url} ${repo.relativePath}`);
     }
     result.failed = manifest.github_repos.length;
     return result;
   }
   for (const repo of manifest.github_repos) {
-    const targetDir = repo.isFork ? path3.join(targetWorkspace, "forks", repo.name) : path3.join(targetWorkspace, repo.name);
+    const targetDir = path3.join(targetWorkspace, repo.relativePath);
     if (fs3.existsSync(targetDir)) {
-      console.log(`   \u23ED\uFE0F  ${repo.name} (already exists)`);
+      console.log(`   \u23ED\uFE0F  ${repo.relativePath} (already exists)`);
       result.skipped++;
       continue;
     }
     try {
       fs3.mkdirSync(path3.dirname(targetDir), { recursive: true });
-      console.log(`   \u{1F4E5} Cloning ${repo.name}${repo.isFork ? " (fork)" : ""}...`);
-      execSync3(`gh repo clone "${repo.url}" "${targetDir}"`, {
+      console.log(`   \u{1F4E5} Cloning ${repo.name} \u2192 ${repo.relativePath}...`);
+      execSync3(`git clone "${repo.url}" "${targetDir}"`, {
         encoding: "utf-8",
         timeout: 12e4,
         stdio: "pipe"
@@ -622,7 +648,7 @@ function cloneGitHubRepos(manifest, targetWorkspace) {
       console.log(`   \u2705 ${repo.name}`);
       result.cloned++;
     } catch {
-      console.log(`   \u26A0\uFE0F  Failed to clone ${repo.name}`);
+      console.log(`   \u26A0\uFE0F  Failed to clone ${repo.name} (${repo.url})`);
       result.failed++;
     }
   }
@@ -719,7 +745,7 @@ async function unpack(soulFile, workspacePath) {
   } else {
     console.log("   \u23ED\uFE0F  No sessions in archive");
   }
-  const repoResult = cloneGitHubRepos(manifest, targetWorkspace);
+  const repoResult = cloneWorkspaceRepos(manifest, targetWorkspace);
   fs3.rmSync(tmpDir, { recursive: true });
   let gatewayStarted = false;
   if (openclawInstalled) {
@@ -790,10 +816,9 @@ async function inspect(soulFile) {
     console.log(`\u{1F4DD} Files:    ${manifest.files.length}`);
     if (manifest.github_repos.length > 0) {
       console.log(`
-\u{1F419} GitHub Repos (${manifest.github_repos.length}):`);
+\u{1F419} Workspace Repos (${manifest.github_repos.length}):`);
       for (const repo of manifest.github_repos) {
-        const fork = repo.isFork ? " (fork)" : "";
-        console.log(`   \u2022 ${repo.name}${fork}`);
+        console.log(`   \u2022 ${repo.name} (\u2192 ${repo.relativePath})`);
         console.log(`     ${repo.url}`);
       }
     }

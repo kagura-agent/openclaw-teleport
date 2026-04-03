@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { execSync } from 'node:child_process';
-import { loadConfig, commandExists, installGh, isGhAuthenticated, type Manifest, type OpenClawConfig, type CronJob } from './utils.js';
+import { loadConfig, commandExists, type Manifest, type OpenClawConfig, type CronJob } from './utils.js';
 
 const OPENCLAW_DIR = path.join(os.homedir(), '.openclaw');
 const CONFIG_PATH = path.join(OPENCLAW_DIR, 'openclaw.json');
@@ -175,6 +175,22 @@ function writeAgentConfig(
       console.log('   ✅ Gateway config restored');
     }
 
+    // Restore extraDirs from relative paths
+    if (manifest.extra_dirs_relative && manifest.extra_dirs_relative.length > 0) {
+      const absoluteDirs = manifest.extra_dirs_relative.map(rel => path.join(targetWorkspace, rel));
+      if (!existingConfig.skills) {
+        (existingConfig as Record<string, unknown>).skills = { load: { extraDirs: absoluteDirs } };
+      } else {
+        const skills = existingConfig.skills as Record<string, unknown>;
+        if (!skills.load) {
+          skills.load = { extraDirs: absoluteDirs };
+        } else {
+          (skills.load as Record<string, unknown>).extraDirs = absoluteDirs;
+        }
+      }
+      console.log(`   ✅ extraDirs restored: ${absoluteDirs.join(', ')}`);
+    }
+
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(existingConfig, null, 2));
   } else {
     // Create new config from scratch
@@ -210,6 +226,13 @@ function writeAgentConfig(
     if (manifest.gateway && Object.keys(manifest.gateway).length > 0) {
       newConfig.gateway = manifest.gateway;
       console.log('   ✅ Gateway config restored');
+    }
+
+    // Restore extraDirs from relative paths
+    if (manifest.extra_dirs_relative && manifest.extra_dirs_relative.length > 0) {
+      const absoluteDirs = manifest.extra_dirs_relative.map(rel => path.join(targetWorkspace, rel));
+      (newConfig as Record<string, unknown>).skills = { load: { extraDirs: absoluteDirs } };
+      console.log(`   ✅ extraDirs restored: ${absoluteDirs.join(', ')}`);
     }
 
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(newConfig, null, 2));
@@ -291,72 +314,56 @@ function restoreCredentials(stageDir: string): number {
     fs.copyFileSync(path.join(credSrc, f), path.join(credDst, f));
   }
   console.log(`   ✅ ${files.length} credential file(s) restored`);
+
+  // Restore .env file if present
+  const envSrc = path.join(credSrc, '.env');
+  if (fs.existsSync(envSrc)) {
+    const envDst = path.join(OPENCLAW_DIR, '.env');
+    if (!fs.existsSync(envDst)) {
+      fs.copyFileSync(envSrc, envDst);
+      console.log('   ✅ .env file restored');
+    } else {
+      console.log('   ⏭️  .env already exists, skipping');
+    }
+  }
+
   return files.length;
 }
 
 // ── Step 4 & 5: GitHub auth + clone repos ──────────────────────────
 
-function cloneGitHubRepos(manifest: Manifest, targetWorkspace: string): { cloned: number; skipped: number; failed: number } {
+function cloneWorkspaceRepos(manifest: Manifest, targetWorkspace: string): { cloned: number; skipped: number; failed: number } {
   const result = { cloned: 0, skipped: 0, failed: 0 };
 
   if (!manifest.github_repos || manifest.github_repos.length === 0) {
     return result;
   }
 
-  console.log('\n🐙 Cloning GitHub repos...');
+  console.log('\n🐙 Cloning workspace repos...');
 
-  // Check if gh CLI is available, install if not
-  if (!commandExists('gh')) {
-    console.log('   ⬇️  GitHub CLI (gh) not found, installing...');
-    const installed = installGh();
-    if (!installed) {
-      console.log('   ⚠️  Could not auto-install GitHub CLI');
-      console.log('   Install manually: https://cli.github.com/');
-      console.log(`   Repos to clone manually (${manifest.github_repos.length}):`);
-      for (const repo of manifest.github_repos) {
-        console.log(`     git clone ${repo.url}`);
-      }
-      result.failed = manifest.github_repos.length;
-      return result;
-    }
-    console.log('   ✅ GitHub CLI installed');
-  }
-
-  // Check GitHub auth
-  if (!isGhAuthenticated()) {
-    console.log('   ⚠️  GitHub CLI not authenticated');
-    console.log('');
-    console.log('   ┌──────────────────────────────────────────────┐');
-    console.log('   │  Please run:  gh auth login                  │');
-    console.log('   │                                              │');
-    console.log('   │  Then re-run unpack, or clone manually:      │');
-    console.log('   └──────────────────────────────────────────────┘');
-    console.log('');
+  if (!commandExists('git')) {
+    console.log('   ⚠️  git not found');
+    console.log(`   Repos to clone manually (${manifest.github_repos.length}):`);
     for (const repo of manifest.github_repos) {
-      const fork = repo.isFork ? ' (fork)' : '';
-      console.log(`   • ${repo.name}${fork}: ${repo.url}`);
+      console.log(`     git clone ${repo.url} ${repo.relativePath}`);
     }
     result.failed = manifest.github_repos.length;
     return result;
   }
 
-  // Clone repos
   for (const repo of manifest.github_repos) {
-    // Forks go to workspace/forks/, others go directly to workspace/
-    const targetDir = repo.isFork
-      ? path.join(targetWorkspace, 'forks', repo.name)
-      : path.join(targetWorkspace, repo.name);
+    const targetDir = path.join(targetWorkspace, repo.relativePath);
 
     if (fs.existsSync(targetDir)) {
-      console.log(`   ⏭️  ${repo.name} (already exists)`);
+      console.log(`   ⏭️  ${repo.relativePath} (already exists)`);
       result.skipped++;
       continue;
     }
 
     try {
       fs.mkdirSync(path.dirname(targetDir), { recursive: true });
-      console.log(`   📥 Cloning ${repo.name}${repo.isFork ? ' (fork)' : ''}...`);
-      execSync(`gh repo clone "${repo.url}" "${targetDir}"`, {
+      console.log(`   📥 Cloning ${repo.name} → ${repo.relativePath}...`);
+      execSync(`git clone "${repo.url}" "${targetDir}"`, {
         encoding: 'utf-8',
         timeout: 120000,
         stdio: 'pipe',
@@ -364,7 +371,7 @@ function cloneGitHubRepos(manifest: Manifest, targetWorkspace: string): { cloned
       console.log(`   ✅ ${repo.name}`);
       result.cloned++;
     } catch {
-      console.log(`   ⚠️  Failed to clone ${repo.name}`);
+      console.log(`   ⚠️  Failed to clone ${repo.name} (${repo.url})`);
       result.failed++;
     }
   }
@@ -493,8 +500,8 @@ export async function unpack(soulFile: string, workspacePath?: string): Promise<
     console.log('   ⏭️  No sessions in archive');
   }
 
-  // ── Step 7: Clone GitHub repos ──────────────────────────────────
-  const repoResult = cloneGitHubRepos(manifest, targetWorkspace);
+  // ── Step 7: Clone workspace repos ─────────────────────────────
+  const repoResult = cloneWorkspaceRepos(manifest, targetWorkspace);
 
   // Clean up temp directory
   fs.rmSync(tmpDir, { recursive: true });
@@ -589,10 +596,9 @@ export async function inspect(soulFile: string): Promise<void> {
     console.log(`📝 Files:    ${manifest.files.length}`);
 
     if (manifest.github_repos.length > 0) {
-      console.log(`\n🐙 GitHub Repos (${manifest.github_repos.length}):`);
+      console.log(`\n🐙 Workspace Repos (${manifest.github_repos.length}):`);
       for (const repo of manifest.github_repos) {
-        const fork = repo.isFork ? ' (fork)' : '';
-        console.log(`   • ${repo.name}${fork}`);
+        console.log(`   • ${repo.name} (→ ${repo.relativePath})`);
         console.log(`     ${repo.url}`);
       }
     }
