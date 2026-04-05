@@ -21,12 +21,13 @@ All packed into a single `.soul` file (tar.gz). On a new machine, `unpack` does 
 
 1. ✅ Installs OpenClaw (if missing)
 2. ✅ Restores full workspace (files, memory, workflows, skills, databases)
-3. ✅ Writes agent config + channel credentials to `openclaw.json`
+3. ✅ Writes agent config + channel credentials to `openclaw.json` (including gateway, models, bindings, extraDirs)
 4. ✅ Restores cron jobs
-5. ✅ Clones GitHub repos (auto-detects forks)
-6. ✅ Guides through GitHub auth if needed
-7. ✅ Starts the OpenClaw gateway
-8. ✅ Prints a welcome summary
+5. ✅ Restores credentials (pairing records, `.env`)
+6. ✅ Restores session history (`.jsonl` files)
+7. ✅ Clones GitHub repos (auto-detects forks)
+8. ✅ Starts the OpenClaw gateway
+9. ✅ Prints a welcome summary
 
 ## Prerequisites
 
@@ -75,11 +76,13 @@ openclaw-teleport unpack kagura_20260320.soul --workspace /path/to/workspace
 What happens:
 1. **OpenClaw check** — installs via `npm install -g openclaw` if missing
 2. **Workspace restored** — full directory structure (identity, memory, workflows, skills, databases)
-3. **Config written** — agent config + channel credentials merged into `openclaw.json`
+3. **Config written** — agent config + channel credentials merged into `openclaw.json` (gateway, models, bindings, extraDirs all restored)
 4. **Cron jobs restored** — full job definitions written to `~/.openclaw/cron/jobs.json`
-5. **GitHub repos cloned** — using `gh repo clone` (git repo subdirectories that were skipped during pack)
-6. **Gateway started** — `openclaw gateway start`
-7. **Welcome summary** — file counts, repo status, configured services
+5. **Credentials restored** — pairing records (`~/.openclaw/credentials/`) and `.env` file
+6. **Session history restored** — `.jsonl` session files to `~/.openclaw/agents/<id>/sessions/`
+7. **GitHub repos cloned** — using `git clone` (git repo subdirectories that were skipped during pack)
+8. **Gateway started** — `openclaw gateway start`
+9. **Welcome summary** — file counts, repo status, configured services
 
 ### Inspect a .soul file
 
@@ -88,6 +91,41 @@ openclaw-teleport inspect kagura_20260320.soul
 ```
 
 Shows manifest info without unpacking: agent name, pack date, file count, repo list, channels, cron jobs, services.
+
+### Snapshot the entire OpenClaw instance
+
+While `pack`/`unpack` operate on a **single agent**, `snapshot` captures the **entire `~/.openclaw/` directory** — all agents, configs, credentials, and sessions in one file.
+
+```bash
+# Pack a full instance snapshot
+openclaw-teleport snapshot pack
+
+# Pack to a custom output path
+openclaw-teleport snapshot pack -o /tmp/my-backup.snapshot
+```
+
+Output: `~/.openclaw/backups/openclaw_YYYYMMDD.snapshot`
+
+Skips: `node_modules`, `.git`, `dist`, `__pycache__`, `.venv`, `backups`, and git repo subdirectories inside agent workspaces (those are cloned on restore).
+
+```bash
+# Restore from a snapshot (requires empty ~/.openclaw/ or --force)
+openclaw-teleport snapshot restore openclaw_20260405.snapshot
+openclaw-teleport snapshot restore openclaw_20260405.snapshot --force
+```
+
+What happens:
+1. **Files restored** — entire `~/.openclaw/` directory rebuilt from the archive
+2. **Path correction** — all paths in `openclaw.json` adjusted from the original home directory to the new one
+3. **Repos cloned** — workspace git repos re-cloned from their remotes
+4. **Gateway started** — `openclaw gateway start`
+
+```bash
+# Inspect a snapshot without restoring
+openclaw-teleport snapshot inspect openclaw_20260405.snapshot
+```
+
+Shows hostname, pack date, file count, agent list, repo list, and contents breakdown.
 
 ## How it works
 
@@ -121,17 +159,21 @@ Shows manifest info without unpacking: agent name, pack date, file count, repo l
     │   └── ...
     ├── config/            ← agent config
     ├── cron/              ← cron files
-    └── credentials/       ← pairing records
+    ├── credentials/       ← pairing records + .env
+    └── sessions/          ← session history (.jsonl files)
 
          ↓ openclaw-teleport unpack (on new machine)
 
     1. Install OpenClaw (if needed)
     2. Restore workspace files
     3. Write config + credentials to openclaw.json
+       (channels, models, bindings, gateway, extraDirs)
     4. Restore cron jobs
-    5. Clone GitHub repos (via gh)
-    6. Start gateway
-    7. "Welcome back, Kagura 🌸"
+    5. Restore credentials (pairing records, .env)
+    6. Restore session history (.jsonl)
+    7. Clone GitHub repos
+    8. Start gateway
+    9. "Welcome back, Kagura 🌸"
 ```
 
 ## manifest.json
@@ -157,7 +199,9 @@ The manifest contains metadata and embedded configurations:
   ],
   "agent_defaults": { "model": { "..." } },
   "models_config": { "..." },
-  "bindings": [ { "..." } ]
+  "bindings": [ { "..." } ],
+  "gateway": { "..." },
+  "extra_dirs_relative": ["kagura-skills"]
 }
 ```
 
@@ -169,12 +213,16 @@ The manifest contains metadata and embedded configurations:
 - Feishu app IDs and secrets
 - Any other channel API keys
 - Cron job payloads (which may reference internal systems)
+- Pairing records and `.env` environment variables
+- Session history
+
+⚠️ **The `.snapshot` file contains the same sensitive data** — it captures the entire `~/.openclaw/` directory including all of the above.
 
 **Best practices:**
-- Add `*.soul` to your `.gitignore`
+- Add `*.soul` and `*.snapshot` to your `.gitignore`
 - Transfer `.soul` files via encrypted channels (SSH, encrypted USB, etc.)
 - Delete `.soul` files after unpacking on the target machine
-- Consider encrypting with `gpg` for storage: `gpg -c agent.soul`
+- Consider encrypting with `gpg` for storage: `gpg -c agent.soul` / `gpg -c instance.snapshot`
 
 ## Development
 
@@ -187,6 +235,8 @@ npm run build
 # Run in dev mode
 npm run dev -- pack
 npm run dev -- unpack agent.soul
+npm run dev -- snapshot pack
+npm run dev -- snapshot restore instance.snapshot
 ```
 
 ## License
