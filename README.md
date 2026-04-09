@@ -242,3 +242,7 @@ npm run dev -- snapshot restore instance.snapshot
 ## License
 
 MIT
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=kagura-agent/openclaw-teleport&type=Date)](https://star-history.com/#kagura-agent/openclaw-teleport&Date)
