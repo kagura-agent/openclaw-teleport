@@ -865,7 +865,8 @@ import * as path4 from "node:path";
 import * as os4 from "node:os";
 import { execSync as execSync4 } from "node:child_process";
 var OPENCLAW_DIR4 = path4.join(os4.homedir(), ".openclaw");
-var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "__pycache__", ".venv", "backups"]);
+var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "__pycache__", "backups"]);
+var SKIP_PREFIXES = [".venv"];
 function isGitRepo2(dirPath) {
   return fs4.existsSync(path4.join(dirPath, ".git"));
 }
@@ -899,6 +900,7 @@ function collectOpenClawFiles(repoAbsPaths) {
     }
     for (const entry of entries) {
       if (SKIP_DIRS2.has(entry.name)) continue;
+      if (SKIP_PREFIXES.some((p) => entry.name.startsWith(p))) continue;
       const fullPath = path4.join(dir, entry.name);
       const rel = prefix ? path4.join(prefix, entry.name) : entry.name;
       if (entry.isDirectory()) {

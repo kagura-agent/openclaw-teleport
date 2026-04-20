@@ -32,7 +32,8 @@ interface SnapshotManifest {
 
 // ── Directories to skip during collection ──────────────────────────
 
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '__pycache__', '.venv', 'backups']);
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '__pycache__', 'backups']);
+const SKIP_PREFIXES = ['.venv'];
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ function collectOpenClawFiles(repoAbsPaths: Set<string>): string[] {
     }
     for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name)) continue;
+      if (SKIP_PREFIXES.some(p => entry.name.startsWith(p))) continue;
 
       const fullPath = path.join(dir, entry.name);
       const rel = prefix ? path.join(prefix, entry.name) : entry.name;
